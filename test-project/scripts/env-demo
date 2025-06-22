@@ -1,0 +1,46 @@
+#!/bin/bash
+
+echo "=== Uber Environment Variables Demo ==="
+echo ""
+
+echo "1. Basic environment variables:"
+echo "   UBER_BIN_PATH: $UBER_BIN_PATH"
+echo "   UBER_PROJECT_ROOT: $UBER_PROJECT_ROOT"
+echo ""
+
+echo "2. Demonstrating path usage:"
+if [ -f "$UBER_BIN_PATH" ]; then
+  echo "   ✓ Uber binary exists at: $UBER_BIN_PATH"
+else
+  echo "   ✗ Uber binary not found at: $UBER_BIN_PATH"
+fi
+
+if [ -d "$UBER_PROJECT_ROOT" ]; then
+  echo "   ✓ Project root directory exists: $UBER_PROJECT_ROOT"
+  echo "   ✓ Project root contains .uber file: $([ -f "$UBER_PROJECT_ROOT/.uber" ] && echo "Yes" || echo "No")"
+else
+  echo "   ✗ Project root directory not found: $UBER_PROJECT_ROOT"
+fi
+echo ""
+
+echo "3. Relative path examples:"
+echo "   Scripts directory: $UBER_PROJECT_ROOT/scripts"
+echo "   Bin directory: $UBER_PROJECT_ROOT/bin"
+echo "   Config file: $UBER_PROJECT_ROOT/.uber"
+echo ""
+
+echo "4. Practical example - listing project structure:"
+if [ -d "$UBER_PROJECT_ROOT" ]; then
+  echo "   Project contents:"
+  ls -la "$UBER_PROJECT_ROOT" | head -10
+fi
+echo ""
+
+echo "5. You can use these variables in your scripts to:"
+echo "   - Call the uber binary again: \$UBER_BIN_PATH"
+echo "   - Reference files relative to project root: \$UBER_PROJECT_ROOT/file.txt"
+echo "   - Build absolute paths: \$UBER_PROJECT_ROOT/scripts/my-script.sh"
+echo "   - Check if you're in the right project context"
+echo ""
+
+echo "=== Demo Complete ==="
