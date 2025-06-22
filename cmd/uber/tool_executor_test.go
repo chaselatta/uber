@@ -87,9 +87,15 @@ func TestFindExecutableInPathNonExecutable(t *testing.T) {
 	}
 
 	// Test finding non-executable file
-	_, err = executor.findExecutableInPath(tempDir, "test-tool")
-	if err == nil {
-		t.Errorf("Expected error for non-executable file, got nil")
+	// Note: findExecutableInPath now only checks for file existence, not executability
+	// The executability check will happen later when exec.Command is called
+	executablePath, err := executor.findExecutableInPath(tempDir, "test-tool")
+	if err != nil {
+		t.Errorf("Expected to find file (executability check happens later), got error: %v", err)
+	}
+	if executablePath != filepath.Join(tempDir, "test-tool") {
+		t.Errorf("Expected executable path to be %s, got %s",
+			filepath.Join(tempDir, "test-tool"), executablePath)
 	}
 }
 
@@ -137,5 +143,36 @@ func TestFindAndExecuteToolNotFound(t *testing.T) {
 	err := executor.FindAndExecuteTool("nonexistent-tool", []string{})
 	if err == nil {
 		t.Errorf("Expected error when tool not found, got nil")
+	}
+}
+
+func TestExecuteNonExecutableFile(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-non-executable-execution")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create a non-executable file
+	testFile := filepath.Join(tempDir, "test-tool")
+	if err := os.WriteFile(testFile, []byte("not executable"), 0644); err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	executor := &ToolExecutor{
+		ctx: &RunContext{
+			Root:    "/test/project",
+			Verbose: false,
+			Config: &config.Config{
+				ToolPaths: []string{tempDir},
+			},
+		},
+	}
+
+	// Test that execution fails when trying to run a non-executable file
+	err = executor.FindAndExecuteTool("test-tool", []string{})
+	if err == nil {
+		t.Errorf("Expected error when trying to execute non-executable file, got nil")
 	}
 }

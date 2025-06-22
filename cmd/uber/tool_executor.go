@@ -63,15 +63,10 @@ func (te *ToolExecutor) findExecutableInPath(toolPath, toolName string) (string,
 	// Construct the full path to the executable
 	executablePath := filepath.Join(fullPath, toolName)
 
-	// Check if the file exists and is executable
-	fileInfo, err := os.Stat(executablePath)
-	if err != nil {
+	// Check if the file exists
+	// Let exec.Command handle executability validation at runtime
+	if _, err := os.Stat(executablePath); err != nil {
 		return "", fmt.Errorf("file not found: %w", err)
-	}
-
-	// Check if the file is executable
-	if fileInfo.Mode()&0111 == 0 {
-		return "", fmt.Errorf("file is not executable")
 	}
 
 	return executablePath, nil
