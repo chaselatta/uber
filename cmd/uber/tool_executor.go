@@ -32,15 +32,15 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 		executablePath, err := te.findExecutableInPath(toolPath, toolName)
 		if err != nil {
 			if te.ctx.Verbose {
-				fmt.Printf("Tool '%s' not found in path '%s': %v\n", toolName, toolPath, err)
+				ColorPrint(ColorYellow, fmt.Sprintf("Tool '%s' not found in path '%s': %v\n", toolName, toolPath, err))
 			}
 			continue
 		}
 
 		// Found the executable, execute it
 		if te.ctx.Verbose {
-			fmt.Printf("Found tool '%s' at: %s\n", toolName, executablePath)
-			fmt.Printf("Executing with args: %v\n", args)
+			ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' at: %s\n", toolName, executablePath))
+			ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
 		}
 
 		return te.executeTool(executablePath, args)
@@ -89,7 +89,7 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string) error 
 
 	// Execute the command
 	if te.ctx.Verbose {
-		fmt.Printf("Executing: %s %v\n", executablePath, args)
+		ColorPrint(ColorGreen, fmt.Sprintf("Executing: %s %v\n", executablePath, args))
 	}
 
 	return cmd.Run()

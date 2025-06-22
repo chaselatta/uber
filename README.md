@@ -7,8 +7,9 @@ Uber is a tool launcher that helps you organize and run scripts and executables 
 - **Automatic tool discovery**: Searches for executables in configured tool paths
 - **Relative and absolute paths**: Supports both relative (project-root based) and absolute tool paths
 - **Project root detection**: Automatically finds the project root by looking for a `.uber` file
-- **Verbose mode**: Get detailed information about tool discovery and execution
+- **Verbose mode**: Get detailed information about tool discovery and execution with colored output
 - **Flexible configuration**: Simple TOML-based configuration
+- **Colored output**: When running in a terminal, verbose output uses colors for better readability
 
 ## Installation
 
@@ -42,7 +43,7 @@ uber my-tool
 # Run a tool with arguments
 uber my-tool arg1 arg2
 
-# Run with verbose output
+# Run with verbose output (colored when in terminal)
 uber --verbose my-tool arg1 arg2
 ```
 
@@ -51,6 +52,16 @@ uber --verbose my-tool arg1 arg2
 - `--root <path>`: Specify the project root directory (default: auto-detect)
 - `--verbose` or `-v`: Enable verbose output showing tool discovery process
 
+### Colored Output
+
+When running in a terminal, verbose mode uses colors to make output more readable:
+
+- **🟢 Green**: Actions being performed (tool found, executing)
+- **🟡 Yellow**: Warnings or non-critical issues (tool not found in specific path)
+- **🔴 Red**: Errors (tool not found anywhere, configuration issues)
+
+When output is redirected to a file or pipe, colors are automatically disabled.
+
 ### Examples
 
 ```bash
@@ -58,7 +69,7 @@ uber --verbose my-tool arg1 arg2
 uber hello world
 # Searches for 'hello' in configured tool paths and runs it with 'world' as argument
 
-# With verbose mode
+# With verbose mode (colored output in terminal)
 uber --verbose test-script arg1 arg2
 # Shows which paths were searched and where the tool was found
 
