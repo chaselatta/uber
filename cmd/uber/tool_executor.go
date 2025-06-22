@@ -82,9 +82,17 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string) error 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	// Set environment variables for context
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("UBER_BIN_PATH=%s", te.ctx.UberBinPath),
+		fmt.Sprintf("UBER_PROJECT_ROOT=%s", te.ctx.Root),
+	)
+
 	// Execute the command
 	if te.ctx.Verbose {
 		ColorPrint(ColorGreen, fmt.Sprintf("Executing: %s %v\n", executablePath, args))
+		ColorPrint(ColorGreen, fmt.Sprintf("UBER_BIN_PATH=%s\n", te.ctx.UberBinPath))
+		ColorPrint(ColorGreen, fmt.Sprintf("UBER_PROJECT_ROOT=%s\n", te.ctx.Root))
 	}
 
 	return cmd.Run()

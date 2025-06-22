@@ -45,6 +45,7 @@ func TestParseArgs(t *testing.T) {
 			args: []string{"--root", "/tmp", "--verbose", "start", "foo", "bar"},
 			want: &RunContext{
 				Root:          "/tmp",
+				UberBinPath:   "/dummy/bin/path",
 				Verbose:       true,
 				Command:       "start",
 				RemainingArgs: []string{"foo", "bar"},
@@ -69,6 +70,7 @@ func TestParseArgs(t *testing.T) {
 			args: []string{"--root", "/tmp", "--verbose", "start", "--root", "foo"},
 			want: &RunContext{
 				Root:          "/tmp",
+				UberBinPath:   "/dummy/bin/path",
 				Verbose:       true,
 				Command:       "start",
 				RemainingArgs: []string{"--root", "foo"},
@@ -133,7 +135,7 @@ func TestParseArgs(t *testing.T) {
 				}
 			}
 
-			got, err := ParseArgs(tt.args, io.Discard)
+			got, err := ParseArgs("/dummy/bin/path", tt.args, io.Discard)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseArgs() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -194,7 +196,7 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 
 	// Test ParseArgs without --root flag
 	args := []string{"test-command", "arg1", "arg2"}
-	ctx, err := ParseArgs(args, nil)
+	ctx, err := ParseArgs("/dummy/bin/path", args, nil)
 	if err != nil {
 		t.Fatalf("ParseArgs failed: %v", err)
 	}
@@ -212,6 +214,10 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 
 	if ctx.Root != expectedRoot {
 		t.Errorf("Expected root %s, got %s", expectedRoot, ctx.Root)
+	}
+
+	if ctx.UberBinPath != "/dummy/bin/path" {
+		t.Errorf("Expected bin path '/dummy/bin/path', got '%s'", ctx.UberBinPath)
 	}
 
 	if ctx.Command != "test-command" {
@@ -235,7 +241,7 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 func TestParseArgsWithoutAutoRoot(t *testing.T) {
 	// Test that ParseArgs fails when no root is specified and no .uber file exists
 	args := []string{"test-command"}
-	_, err := ParseArgs(args, nil)
+	_, err := ParseArgs("/dummy/bin/path", args, nil)
 	if err == nil {
 		t.Error("Expected error when no root is specified and no .uber file exists, but got nil")
 	}

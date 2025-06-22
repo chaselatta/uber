@@ -1,3 +1,9 @@
 #!/bin/bash
 echo "Hello from bin/hello!"
 echo "Arguments received: $@"
+echo ""
+echo "Environment variables provided by uber:"
+echo "UBER_BIN_PATH: $UBER_BIN_PATH"
+echo "UBER_PROJECT_ROOT: $UBER_PROJECT_ROOT"
+echo ""
+echo "Current working directory: $(pwd)"

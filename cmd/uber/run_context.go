@@ -13,6 +13,7 @@ import (
 // RunContext holds all parsed command-line arguments and flags.
 type RunContext struct {
 	Root          string
+	UberBinPath   string
 	Verbose       bool
 	Command       string
 	RemainingArgs []string
@@ -72,7 +73,7 @@ func validateProjectRoot(rootPath string) error {
 // If --root is specified, it validates that the directory contains a .uber file.
 // If no --root is specified, it automatically finds the project root by walking up
 // the directory tree to find a directory containing a .uber file.
-func ParseArgs(args []string, output io.Writer) (*RunContext, error) {
+func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, error) {
 	fs := flag.NewFlagSet("uber", flag.ContinueOnError)
 	root := fs.String("root", "", "Specify the root directory (e.g., --root /path/to/dir)")
 	verbose := fs.Bool("verbose", false, "Enable verbose output (-v or --verbose)")
@@ -114,6 +115,7 @@ func ParseArgs(args []string, output io.Writer) (*RunContext, error) {
 
 	return &RunContext{
 		Root:          projectRoot,
+		UberBinPath:   binPath,
 		Verbose:       *verbose,
 		Command:       remaining[0],
 		RemainingArgs: remaining[1:],

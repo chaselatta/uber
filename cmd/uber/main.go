@@ -4,10 +4,18 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 )
 
 func main() {
-	ctx, err := ParseArgs(os.Args[1:], nil)
+	// Get the absolute path to the uber binary
+	binPath, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting binary path: %v\n", err)
+		os.Exit(1)
+	}
+
+	ctx, err := ParseArgs(binPath, os.Args[1:], nil)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		flag.Usage()
