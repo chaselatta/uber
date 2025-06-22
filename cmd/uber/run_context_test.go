@@ -2,6 +2,8 @@ package main
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -42,32 +44,10 @@ func TestParseArgs(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name: "short verbose flag",
-			args: []string{"-v", "stop"},
-			want: &RunContext{
-				Root:          "",
-				Verbose:       true,
-				Command:       "stop",
-				RemainingArgs: []string{},
-			},
-			wantErr: false,
-		},
-		{
 			name:    "missing command",
 			args:    []string{"--root", "/tmp"},
 			want:    nil,
 			wantErr: true,
-		},
-		{
-			name: "no flags, just command",
-			args: []string{"start"},
-			want: &RunContext{
-				Root:          "",
-				Verbose:       false,
-				Command:       "start",
-				RemainingArgs: []string{},
-			},
-			wantErr: false,
 		},
 		{
 			name:    "unknown flag",
@@ -88,5 +68,172 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("ParseArgs() = %+v, want %+v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestParseArgsWithAutoRoot(t *testing.T) {
+	// Create a temporary directory structure for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-parse")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create nested directory structure
+	subDir1 := filepath.Join(tempDir, "subdir1")
+	subDir2 := filepath.Join(subDir1, "subdir2")
+
+	if err := os.MkdirAll(subDir2, 0755); err != nil {
+		t.Fatalf("Failed to create nested directories: %v", err)
+	}
+
+	// Create .uber file in subdir1 (project root)
+	uberFile := filepath.Join(subDir1, ".uber")
+	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create .uber file: %v", err)
+	}
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original working directory: %v", err)
+	}
+
+	// Change to subdir2
+	if err := os.Chdir(subDir2); err != nil {
+		t.Fatalf("Failed to change to subdir2: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Test ParseArgs without --root flag
+	args := []string{"test-command", "arg1", "arg2"}
+	ctx, err := ParseArgs(args, nil)
+	if err != nil {
+		t.Fatalf("ParseArgs failed: %v", err)
+	}
+
+	// Verify the root was found automatically
+	expectedRoot, err := filepath.Abs(subDir1)
+	if err != nil {
+		t.Fatalf("Failed to get absolute path of expected root: %v", err)
+	}
+	// Normalize the path to handle symlinks (important on macOS)
+	expectedRoot, err = filepath.EvalSymlinks(expectedRoot)
+	if err != nil {
+		t.Fatalf("Failed to evaluate symlinks for expected root: %v", err)
+	}
+
+	if ctx.Root != expectedRoot {
+		t.Errorf("Expected root %s, got %s", expectedRoot, ctx.Root)
+	}
+
+	if ctx.Command != "test-command" {
+		t.Errorf("Expected command 'test-command', got '%s'", ctx.Command)
+	}
+
+	expectedRemainingArgs := []string{"arg1", "arg2"}
+	if !reflect.DeepEqual(ctx.RemainingArgs, expectedRemainingArgs) {
+		t.Errorf("Expected remaining args %v, got %v", expectedRemainingArgs, ctx.RemainingArgs)
+	}
+}
+
+func TestParseArgsWithoutAutoRoot(t *testing.T) {
+	// Test that ParseArgs fails when no root is specified and no .uber file exists
+	args := []string{"test-command"}
+	_, err := ParseArgs(args, nil)
+	if err == nil {
+		t.Error("Expected error when no root is specified and no .uber file exists, but got nil")
+	}
+
+	expectedErrorPrefix := "failed to find project root:"
+	if err.Error()[:len(expectedErrorPrefix)] != expectedErrorPrefix {
+		t.Errorf("Expected error message to start with '%s', got '%s'", expectedErrorPrefix, err.Error())
+	}
+}
+
+func TestFindProjectRoot(t *testing.T) {
+	// Create a temporary directory structure for testing
+	tempDir, err := os.MkdirTemp("", "uber-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create nested directory structure
+	subDir1 := filepath.Join(tempDir, "subdir1")
+	subDir2 := filepath.Join(subDir1, "subdir2")
+	subDir3 := filepath.Join(subDir2, "subdir3")
+
+	if err := os.MkdirAll(subDir3, 0755); err != nil {
+		t.Fatalf("Failed to create nested directories: %v", err)
+	}
+
+	// Create .uber file in subdir1 (project root)
+	uberFile := filepath.Join(subDir1, ".uber")
+	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create .uber file: %v", err)
+	}
+
+	// Test finding project root from subdir3
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original working directory: %v", err)
+	}
+
+	// Change to subdir3
+	if err := os.Chdir(subDir3); err != nil {
+		t.Fatalf("Failed to change to subdir3: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Find project root
+	foundRoot, err := findProjectRoot()
+	if err != nil {
+		t.Fatalf("findProjectRoot failed: %v", err)
+	}
+
+	// Verify we found the correct root
+	expectedRoot, err := filepath.Abs(subDir1)
+	if err != nil {
+		t.Fatalf("Failed to get absolute path of expected root: %v", err)
+	}
+	// Normalize the path to handle symlinks (important on macOS)
+	expectedRoot, err = filepath.EvalSymlinks(expectedRoot)
+	if err != nil {
+		t.Fatalf("Failed to evaluate symlinks for expected root: %v", err)
+	}
+
+	if foundRoot != expectedRoot {
+		t.Errorf("Expected project root %s, got %s", expectedRoot, foundRoot)
+	}
+}
+
+func TestFindProjectRootNotFound(t *testing.T) {
+	// Create a temporary directory without .uber file
+	tempDir, err := os.MkdirTemp("", "uber-test-no-root")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original working directory: %v", err)
+	}
+
+	// Change to temp directory
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
+	// Try to find project root
+	_, err = findProjectRoot()
+	if err == nil {
+		t.Error("Expected error when no .uber file is found, but got nil")
+	}
+
+	expectedError := "no .uber file found in current directory or any parent directories"
+	if err.Error() != expectedError {
+		t.Errorf("Expected error message '%s', got '%s'", expectedError, err.Error())
 	}
 }
