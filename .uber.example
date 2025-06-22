@@ -1,0 +1,13 @@
+# Example .uber configuration file
+# This file should be placed in your project root directory
+
+# List of paths where uber will search for tools
+# Paths can be absolute or relative to the project root
+tool_paths = [
+    "/usr/local/bin",     # Absolute path to system tools
+    "bin",                # Relative path to project bin directory
+    "tools",              # Relative path to project tools directory
+    "/opt/tools",         # Absolute path to additional tools
+    "./scripts",          # Relative path using ./ notation
+    "../external-tools"   # Relative path to external tools directory
+] 

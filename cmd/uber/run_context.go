@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/chaselatta/uber/config"
 )
 
 // RunContext holds all parsed command-line arguments and flags.
@@ -14,6 +16,7 @@ type RunContext struct {
 	Verbose       bool
 	Command       string
 	RemainingArgs []string
+	Config        *config.Config
 }
 
 // findProjectRoot walks up the directory tree starting from the current working directory
@@ -103,10 +106,17 @@ func ParseArgs(args []string, output io.Writer) (*RunContext, error) {
 		projectRoot = foundRoot
 	}
 
+	// Load the TOML configuration
+	config, err := config.LoadFromFile(projectRoot)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load configuration: %w", err)
+	}
+
 	return &RunContext{
 		Root:          projectRoot,
 		Verbose:       *verbose,
 		Command:       remaining[0],
 		RemainingArgs: remaining[1:],
+		Config:        config,
 	}, nil
 }
