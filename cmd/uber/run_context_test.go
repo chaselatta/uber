@@ -8,15 +8,37 @@ import (
 	"testing"
 )
 
+// createTempDirWithUberFile creates a temporary directory with a .uber file
+// and returns the directory path and a cleanup function
+func createTempDirWithUberFile(t *testing.T, prefix string) (string, func()) {
+	tempDir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+
+	// Create .uber file in temp directory
+	uberFile := filepath.Join(tempDir, ".uber")
+	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+		t.Fatalf("Failed to create .uber file: %v", err)
+	}
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return tempDir, cleanup
+}
+
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    []string
 		want    *RunContext
 		wantErr bool
+		setup   func() (string, func()) // setup function returns temp dir and cleanup function
 	}{
 		{
-			name: "all flags and command",
+			name: "all flags and command with valid root",
 			args: []string{"--root", "/tmp", "--verbose", "start", "foo", "bar"},
 			want: &RunContext{
 				Root:          "/tmp",
@@ -25,12 +47,16 @@ func TestParseArgs(t *testing.T) {
 				RemainingArgs: []string{"foo", "bar"},
 			},
 			wantErr: false,
+			setup: func() (string, func()) {
+				return createTempDirWithUberFile(t, "uber-test-valid-root")
+			},
 		},
 		{
 			name:    "empty",
 			args:    []string{},
 			want:    nil,
 			wantErr: true,
+			setup:   nil,
 		},
 		{
 			name: "root not parsed twice",
@@ -42,23 +68,62 @@ func TestParseArgs(t *testing.T) {
 				RemainingArgs: []string{"--root", "foo"},
 			},
 			wantErr: false,
+			setup: func() (string, func()) {
+				return createTempDirWithUberFile(t, "uber-test-valid-root")
+			},
 		},
 		{
 			name:    "missing command",
 			args:    []string{"--root", "/tmp"},
 			want:    nil,
 			wantErr: true,
+			setup:   nil,
 		},
 		{
 			name:    "unknown flag",
 			args:    []string{"--unknown", "start"},
 			want:    nil,
 			wantErr: true,
+			setup:   nil,
+		},
+		{
+			name:    "invalid root directory does not exist",
+			args:    []string{"--root", "/nonexistent/directory", "start"},
+			want:    nil,
+			wantErr: true,
+			setup:   nil,
+		},
+		{
+			name:    "invalid root directory missing .uber file",
+			args:    []string{"--root", "/tmp", "start"},
+			want:    nil,
+			wantErr: true,
+			setup:   nil,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var tempDir string
+			var cleanup func()
+
+			if tt.setup != nil {
+				tempDir, cleanup = tt.setup()
+				defer cleanup()
+
+				// Update the test args to use the actual temp directory path
+				for i, arg := range tt.args {
+					if arg == "/tmp" {
+						tt.args[i] = tempDir
+					}
+				}
+
+				// Update the expected result to use the actual temp directory path
+				if tt.want != nil && tt.want.Root == "/tmp" {
+					tt.want.Root = tempDir
+				}
+			}
+
 			got, err := ParseArgs(tt.args, io.Discard)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseArgs() error = %v, wantErr %v", err, tt.wantErr)
@@ -66,6 +131,19 @@ func TestParseArgs(t *testing.T) {
 			}
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("ParseArgs() = %+v, want %+v", got, tt.want)
+			}
+
+			// Check specific error messages for validation failures
+			if tt.wantErr && err != nil {
+				if tt.name == "invalid root directory does not exist" {
+					if err.Error()[:len("invalid --root flag: specified root directory does not exist")] != "invalid --root flag: specified root directory does not exist" {
+						t.Errorf("Expected error about directory not existing, got: %v", err)
+					}
+				} else if tt.name == "invalid root directory missing .uber file" {
+					if err.Error()[:len("invalid --root flag: specified root directory does not contain a .uber file")] != "invalid --root flag: specified root directory does not contain a .uber file" {
+						t.Errorf("Expected error about missing .uber file, got: %v", err)
+					}
+				}
 			}
 		})
 	}
@@ -235,5 +313,82 @@ func TestFindProjectRootNotFound(t *testing.T) {
 	expectedError := "no .uber file found in current directory or any parent directories"
 	if err.Error() != expectedError {
 		t.Errorf("Expected error message '%s', got '%s'", expectedError, err.Error())
+	}
+}
+
+func TestValidateProjectRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		rootPath string
+		setup    func() (string, func())
+		wantErr  bool
+	}{
+		{
+			name:     "valid project root with .uber file",
+			rootPath: "/tmp",
+			setup: func() (string, func()) {
+				return createTempDirWithUberFile(t, "uber-test-valid")
+			},
+			wantErr: false,
+		},
+		{
+			name:     "directory does not exist",
+			rootPath: "/nonexistent/directory",
+			setup:    nil,
+			wantErr:  true,
+		},
+		{
+			name:     "directory exists but no .uber file",
+			rootPath: "/tmp",
+			setup: func() (string, func()) {
+				tempDir, err := os.MkdirTemp("", "uber-test-no-uber")
+				if err != nil {
+					t.Fatalf("Failed to create temp directory: %v", err)
+				}
+
+				cleanup := func() {
+					os.RemoveAll(tempDir)
+				}
+
+				return tempDir, cleanup
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var tempDir string
+			var cleanup func()
+
+			if tt.setup != nil {
+				tempDir, cleanup = tt.setup()
+				defer cleanup()
+
+				// Update the test to use the actual temp directory path
+				if tt.rootPath == "/tmp" {
+					tt.rootPath = tempDir
+				}
+			}
+
+			err := validateProjectRoot(tt.rootPath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateProjectRoot() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			// Check specific error messages
+			if tt.wantErr && err != nil {
+				if tt.name == "directory does not exist" {
+					if err.Error()[:len("specified root directory does not exist")] != "specified root directory does not exist" {
+						t.Errorf("Expected error about directory not existing, got: %v", err)
+					}
+				} else if tt.name == "directory exists but no .uber file" {
+					if err.Error() != "specified root directory does not contain a .uber file" {
+						t.Errorf("Expected error about missing .uber file, got: %v", err)
+					}
+				}
+			}
+		})
 	}
 }

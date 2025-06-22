@@ -47,8 +47,28 @@ func findProjectRoot() (string, error) {
 	return "", fmt.Errorf("no .uber file found in current directory or any parent directories")
 }
 
+// validateProjectRoot checks if the specified directory contains a .uber file.
+// Returns an error if the directory doesn't contain a .uber file or if the path is invalid.
+func validateProjectRoot(rootPath string) error {
+	// Check if the directory exists
+	if _, err := os.Stat(rootPath); err != nil {
+		return fmt.Errorf("specified root directory does not exist: %w", err)
+	}
+
+	// Check if .uber file exists in the specified directory
+	uberFile := filepath.Join(rootPath, ".uber")
+	if _, err := os.Stat(uberFile); err != nil {
+		return fmt.Errorf("specified root directory does not contain a .uber file")
+	}
+
+	return nil
+}
+
 // ParseArgs parses flags and positional arguments into a RunContext struct.
 // It takes an explicit args slice (excluding the program name) for testability.
+// If --root is specified, it validates that the directory contains a .uber file.
+// If no --root is specified, it automatically finds the project root by walking up
+// the directory tree to find a directory containing a .uber file.
 func ParseArgs(args []string, output io.Writer) (*RunContext, error) {
 	fs := flag.NewFlagSet("uber", flag.ContinueOnError)
 	root := fs.String("root", "", "Specify the root directory (e.g., --root /path/to/dir)")
@@ -68,9 +88,14 @@ func ParseArgs(args []string, output io.Writer) (*RunContext, error) {
 		return nil, fmt.Errorf("missing required positional argument 'command'")
 	}
 
-	// If no root is specified, try to find the project root automatically
+	// If root is specified, validate that it contains a .uber file
 	projectRoot := *root
-	if projectRoot == "" {
+	if projectRoot != "" {
+		if err := validateProjectRoot(projectRoot); err != nil {
+			return nil, fmt.Errorf("invalid --root flag: %w", err)
+		}
+	} else {
+		// If no root is specified, try to find the project root automatically
 		foundRoot, err := findProjectRoot()
 		if err != nil {
 			return nil, fmt.Errorf("failed to find project root: %w", err)
