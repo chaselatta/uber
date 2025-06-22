@@ -6,9 +6,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/chaselatta/uber/config"
 )
 
-// createTempDirWithUberFile creates a temporary directory with a .uber file
+// createTempDirWithUberFile creates a temporary directory with a .uber TOML file
 // and returns the directory path and a cleanup function
 func createTempDirWithUberFile(t *testing.T, prefix string) (string, func()) {
 	tempDir, err := os.MkdirTemp("", prefix)
@@ -16,9 +18,10 @@ func createTempDirWithUberFile(t *testing.T, prefix string) (string, func()) {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 
-	// Create .uber file in temp directory
+	// Create .uber TOML file in temp directory
 	uberFile := filepath.Join(tempDir, ".uber")
-	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+	tomlContent := `tool_paths = ["/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"]`
+	if err := os.WriteFile(uberFile, []byte(tomlContent), 0644); err != nil {
 		t.Fatalf("Failed to create .uber file: %v", err)
 	}
 
@@ -45,6 +48,9 @@ func TestParseArgs(t *testing.T) {
 				Verbose:       true,
 				Command:       "start",
 				RemainingArgs: []string{"foo", "bar"},
+				Config: &config.Config{
+					ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
+				},
 			},
 			wantErr: false,
 			setup: func() (string, func()) {
@@ -66,6 +72,9 @@ func TestParseArgs(t *testing.T) {
 				Verbose:       true,
 				Command:       "start",
 				RemainingArgs: []string{"--root", "foo"},
+				Config: &config.Config{
+					ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
+				},
 			},
 			wantErr: false,
 			setup: func() (string, func()) {
@@ -165,9 +174,10 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 		t.Fatalf("Failed to create nested directories: %v", err)
 	}
 
-	// Create .uber file in subdir1 (project root)
+	// Create .uber TOML file in subdir1 (project root)
 	uberFile := filepath.Join(subDir1, ".uber")
-	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+	tomlContent := `tool_paths = ["/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"]`
+	if err := os.WriteFile(uberFile, []byte(tomlContent), 0644); err != nil {
 		t.Fatalf("Failed to create .uber file: %v", err)
 	}
 
@@ -212,6 +222,14 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 	if !reflect.DeepEqual(ctx.RemainingArgs, expectedRemainingArgs) {
 		t.Errorf("Expected remaining args %v, got %v", expectedRemainingArgs, ctx.RemainingArgs)
 	}
+
+	// Verify the configuration was loaded
+	expectedConfig := &config.Config{
+		ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
+	}
+	if !reflect.DeepEqual(ctx.Config, expectedConfig) {
+		t.Errorf("Expected config %+v, got %+v", expectedConfig, ctx.Config)
+	}
 }
 
 func TestParseArgsWithoutAutoRoot(t *testing.T) {
@@ -245,9 +263,10 @@ func TestFindProjectRoot(t *testing.T) {
 		t.Fatalf("Failed to create nested directories: %v", err)
 	}
 
-	// Create .uber file in subdir1 (project root)
+	// Create .uber TOML file in subdir1 (project root)
 	uberFile := filepath.Join(subDir1, ".uber")
-	if err := os.WriteFile(uberFile, []byte(""), 0644); err != nil {
+	tomlContent := `tool_paths = ["/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"]`
+	if err := os.WriteFile(uberFile, []byte(tomlContent), 0644); err != nil {
 		t.Fatalf("Failed to create .uber file: %v", err)
 	}
 
