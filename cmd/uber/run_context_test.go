@@ -239,9 +239,27 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 }
 
 func TestParseArgsWithoutAutoRoot(t *testing.T) {
+	// Create a temporary directory without .uber file
+	tempDir, err := os.MkdirTemp("", "uber-test-no-root")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	originalWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed to get original working directory: %v", err)
+	}
+
+	// Change to temp directory
+	if err := os.Chdir(tempDir); err != nil {
+		t.Fatalf("Failed to change to temp directory: %v", err)
+	}
+	defer os.Chdir(originalWd)
+
 	// Test that ParseArgs fails when no root is specified and no .uber file exists
 	args := []string{"test-command"}
-	_, err := ParseArgs("/dummy/bin/path", args, nil)
+	_, err = ParseArgs("/dummy/bin/path", args, nil)
 	if err == nil {
 		t.Error("Expected error when no root is specified and no .uber file exists, but got nil")
 	}
