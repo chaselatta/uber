@@ -1,0 +1,8 @@
+# Uber configuration file for the uber project
+# This file enables uber functionality in this project
+
+# List of paths where uber will search for tools
+# Paths can be absolute or relative to the project root
+tool_paths = [
+    "scripts"
+] 
