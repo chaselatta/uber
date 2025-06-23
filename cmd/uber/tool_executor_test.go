@@ -88,15 +88,18 @@ func TestFindExecutableInPathNonExecutable(t *testing.T) {
 	}
 
 	// Test finding non-executable file
-	// Note: findExecutableInPath now only checks for file existence, not executability
-	// The executability check will happen later when exec.Command is called
+	// findExecutableInPath should return an error for non-executable files
 	executablePath, err := executor.findExecutableInPath(tempDir, "test-tool")
-	if err != nil {
-		t.Errorf("Expected to find file (executability check happens later), got error: %v", err)
+	if err == nil {
+		t.Errorf("Expected error for non-executable file, got nil")
 	}
-	if executablePath != filepath.Join(tempDir, "test-tool") {
-		t.Errorf("Expected executable path to be %s, got %s",
-			filepath.Join(tempDir, "test-tool"), executablePath)
+	if executablePath != "" {
+		t.Errorf("Expected empty path for non-executable file, got %s", executablePath)
+	}
+
+	// Verify the error message contains the expected text
+	if !containsSubstring(err.Error(), "file exists but is not executable") {
+		t.Errorf("Expected error message to contain 'file exists but is not executable', got: %v", err)
 	}
 }
 

@@ -151,11 +151,37 @@ func (te *ToolExecutor) ListAvailableTools() error {
 	return nil
 }
 
+// resolveToolFullPath resolves the full path to a tool given a toolPath and toolName
+func (te *ToolExecutor) resolveToolFullPath(toolPath, toolName string) string {
+	var fullPath string
+	if !filepath.IsAbs(toolPath) {
+		fullPath = filepath.Join(te.ctx.Root, toolPath)
+	} else {
+		fullPath = toolPath
+	}
+	return filepath.Join(fullPath, toolName)
+}
+
+// findExecutableInPath checks if a specific executable exists in the given path
+func (te *ToolExecutor) findExecutableInPath(toolPath, toolName string) (string, error) {
+	executablePath := te.resolveToolFullPath(toolPath, toolName)
+
+	// Check if the file exists
+	if _, err := os.Stat(executablePath); err != nil {
+		return "", fmt.Errorf("executable not found: %w", err)
+	}
+
+	// Check if the file is executable
+	if !te.isExecutable(executablePath) {
+		return "", fmt.Errorf("file exists but is not executable")
+	}
+
+	return executablePath, nil
+}
+
 // listExecutablesInPath lists all executable files in the specified path
 func (te *ToolExecutor) listExecutablesInPath(toolPath string) ([]string, error) {
 	var fullPath string
-
-	// If the path is relative, make it relative to the project root
 	if !filepath.IsAbs(toolPath) {
 		fullPath = filepath.Join(te.ctx.Root, toolPath)
 	} else {
@@ -176,8 +202,8 @@ func (te *ToolExecutor) listExecutablesInPath(toolPath string) ([]string, error)
 	var executables []string
 	for _, entry := range entries {
 		if !entry.IsDir() {
-			// Check if the file is executable
-			if te.isExecutable(filepath.Join(fullPath, entry.Name())) {
+			candidatePath := te.resolveToolFullPath(toolPath, entry.Name())
+			if te.isExecutable(candidatePath) {
 				executables = append(executables, entry.Name())
 			}
 		}
