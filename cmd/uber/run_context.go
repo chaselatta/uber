@@ -21,6 +21,10 @@ type RunContext struct {
 	RemainingArgs     []string
 	GlobalCommandArgs string
 	Config            *config.Config
+	FoundToolPath     string
+	TimeFindToolMs    int64
+	TimeEnvSetupMs    int64
+	TimeExecToolMs    int64
 }
 
 // findProjectRoot walks up the directory tree starting from the current working directory

@@ -44,6 +44,7 @@ The `env_setup` key in your `.uber` file specifies the path to this script (rela
 ```toml
 tool_paths = ["bin", "scripts"]
 env_setup = "scripts/env_setup.sh"
+reporting_cmd = "scripts/reporting.sh"
 ```
 
 **Example `env_setup.sh`:**
@@ -63,6 +64,35 @@ print(f"MY_APP_VERSION=1.2.3")
 ```
 
 The environment variables `MY_APP_NAME` and `MY_APP_VERSION` will be available to any tool executed by `uber`.
+
+### Post-Execution Reporting
+
+You can define a reporting command that will be executed after your tool has run. This is useful for sending metrics, notifications, or any other post-execution tasks.
+
+The `reporting_cmd` key in your `.uber` file specifies the path to this script. The script can be in any language, as long as it's executable.
+
+**Contract:**
+- The script at `reporting_cmd` must be an executable file.
+- It will be executed after the main tool finishes.
+- The reporting command will have access to the following environment variables:
+  - `UBER_EXECUTED_COMMAND`: The name of the tool that was executed.
+  - `UBER_EXECUTED_TOOL_PATH`: The path where the executed tool was found.
+  - `UBER_ARGS`: A string containing all the arguments passed to the tool.
+  - `UBER_TIMING_FIND_TOOL_MS`: Time spent finding the tool (in milliseconds).
+  - `UBER_TIMING_ENV_SETUP_MS`: Time spent in the `env_setup` script (in milliseconds).
+  - `UBER_TIMING_EXECUTION_MS`: Time the tool spent executing (in milliseconds).
+  - `UBER_TOTAL_TIME_MS`: Total time from tool search to execution completion.
+
+**Example `reporting.sh`:**
+```sh
+#!/bin/sh
+echo "--- Reporting ---"
+echo "Tool: $UBER_EXECUTED_COMMAND"
+echo "Args: $UBER_ARGS"
+echo "Total time: $UBER_TOTAL_TIME_MS ms"
+echo "--- End Reporting ---"
+# You could also send these metrics to a server, a log file, etc.
+```
 
 ### Tool Paths
 
@@ -143,25 +173,10 @@ my-project/
 Example `.uber` file:
 ```toml
 tool_paths = ["bin", "scripts", "tools", "/usr/local/bin"]
+env_setup = "scripts/env_setup.sh"
+reporting_cmd = "scripts/reporting.sh"
 ```
 
 ## Error Handling
 
-- **No `.uber` file found**: Error message with suggestion to create one
-- **Tool not found**: Searches all configured paths and reports if not found
-- **Non-executable file**: Skips files that aren't executable
-- **Invalid configuration**: Reports TOML parsing errors
-
-## Development
-
-### Running Tests
-
-```bash
-go test ./...
-```
-
-### Building
-
-```bash
-go build -o uber ./cmd/uber
-``` 
+- **No `.uber`

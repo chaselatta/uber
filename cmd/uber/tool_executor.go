@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ToolExecutor handles finding and executing tools based on the configuration
@@ -63,11 +64,13 @@ func (te *ToolExecutor) GetAllAvailableTools() ([]AvailableTool, error) {
 // FindAndExecuteTool searches for the specified tool in the configured tool paths
 // and executes it with the given arguments
 func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error {
+	findToolStart := time.Now()
 	// Get all available tools
 	availableTools, err := te.GetAllAvailableTools()
 	if err != nil {
 		return err
 	}
+	te.ctx.TimeFindToolMs = time.Since(findToolStart).Milliseconds()
 
 	// Find the first occurrence of the tool (honoring tool_paths order)
 	for _, tool := range availableTools {
@@ -77,12 +80,15 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 				ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' in path '%s'\n", toolName, tool.Path))
 				ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
 			}
+			te.ctx.FoundToolPath = tool.Path
 
 			// Execute the env setup script if it's defined
+			envSetupStart := time.Now()
 			env, err := te.executeEnvSetup()
 			if err != nil {
 				return fmt.Errorf("failed to execute env setup script: %w", err)
 			}
+			te.ctx.TimeEnvSetupMs = time.Since(envSetupStart).Milliseconds()
 
 			// Construct the full path to the executable
 			var fullPath string
@@ -93,7 +99,22 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 			}
 			executablePath := filepath.Join(fullPath, toolName)
 
-			return te.executeTool(executablePath, args, env)
+			execStart := time.Now()
+			err = te.executeTool(executablePath, args, env)
+			te.ctx.TimeExecToolMs = time.Since(execStart).Milliseconds()
+			if err != nil {
+				return err // Return original error
+			}
+
+			// After executing the tool, run the reporting command
+			if reportErr := te.executeReportingCmd(); reportErr != nil {
+				if te.ctx.Verbose {
+					ColorPrint(ColorYellow, fmt.Sprintf("Warning: reporting command failed: %v\n", reportErr))
+				}
+				// Do not return this error, as the main tool succeeded
+			}
+
+			return nil
 		}
 	}
 
@@ -203,6 +224,81 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string, env []
 	return cmd.Run()
 }
 
+// executeReportingCmd runs the reporting command if it's defined in the .uber configuration
+func (te *ToolExecutor) executeReportingCmd() error {
+	if te.ctx.Config.ReportingCmd == "" {
+		return nil // No reporting command defined
+	}
+
+	// Resolve the reporting command path
+	executablePath := te.ctx.Config.ReportingCmd
+	if !filepath.IsAbs(executablePath) {
+		executablePath = filepath.Join(te.ctx.Root, executablePath)
+	}
+
+	// Check if the command exists and is executable
+	if _, err := os.Stat(executablePath); os.IsNotExist(err) {
+		return fmt.Errorf("reporting command '%s' not found", executablePath)
+	}
+	if !te.isExecutable(executablePath) {
+		return fmt.Errorf("reporting command '%s' is not executable", executablePath)
+	}
+
+	// The reporting command doesn't take arguments from the command line
+	cmd := exec.Command(executablePath)
+
+	// The environment is prepared with additional reporting variables
+	cmd.Env = te.prepareReportingEnvironment()
+
+	// For reporting, we capture stdout and stderr to show in verbose mode,
+	// but we don't want to pollute the main command's output.
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if te.ctx.Verbose {
+		ColorPrint(ColorCyan, fmt.Sprintf("Executing reporting command: %s\n", executablePath))
+		for _, envVar := range cmd.Env {
+			if strings.HasPrefix(envVar, "UBER_TIMING") || strings.HasPrefix(envVar, "UBER_EXECUTED_") || strings.HasPrefix(envVar, "UBER_ARGS") {
+				ColorPrint(ColorCyan, fmt.Sprintf("  %s\n", envVar))
+			}
+		}
+	}
+
+	err := cmd.Run()
+	if te.ctx.Verbose && err != nil {
+		ColorPrint(ColorYellow, fmt.Sprintf("Reporting command STDOUT: %s\n", stdout.String()))
+		ColorPrint(ColorYellow, fmt.Sprintf("Reporting command STDERR: %s\n", stderr.String()))
+	}
+
+	if err != nil {
+		return fmt.Errorf("error executing reporting command '%s': %w", executablePath, err)
+	}
+
+	return nil
+}
+
+// prepareReportingEnvironment creates the environment for the reporting command
+func (te *ToolExecutor) prepareReportingEnvironment() []string {
+	// Start with the base environment
+	env := te.prepareEnvironment()
+
+	totalTime := te.ctx.TimeFindToolMs + te.ctx.TimeEnvSetupMs + te.ctx.TimeExecToolMs
+
+	// Add timing variables
+	env = append(env,
+		fmt.Sprintf("UBER_EXECUTED_COMMAND=%s", te.ctx.Command),
+		fmt.Sprintf("UBER_EXECUTED_TOOL_PATH=%s", te.ctx.FoundToolPath),
+		fmt.Sprintf("UBER_ARGS=%s", strings.Join(te.ctx.RemainingArgs, " ")),
+		fmt.Sprintf("UBER_TIMING_FIND_TOOL_MS=%d", te.ctx.TimeFindToolMs),
+		fmt.Sprintf("UBER_TIMING_ENV_SETUP_MS=%d", te.ctx.TimeEnvSetupMs),
+		fmt.Sprintf("UBER_TIMING_EXECUTION_MS=%d", te.ctx.TimeExecToolMs),
+		fmt.Sprintf("UBER_TOTAL_TIME_MS=%d", totalTime),
+	)
+
+	return env
+}
+
 // prepareEnvironment creates the environment variables for tool execution
 func (te *ToolExecutor) prepareEnvironment() []string {
 	env := append(os.Environ(),
@@ -250,75 +346,87 @@ func (te *ToolExecutor) ListAvailableTools() error {
 	return nil
 }
 
-// resolveToolFullPath resolves the full path to a tool given a toolPath and toolName
 func (te *ToolExecutor) resolveToolFullPath(toolPath, toolName string) string {
-	var fullPath string
-	if !filepath.IsAbs(toolPath) {
-		fullPath = filepath.Join(te.ctx.Root, toolPath)
-	} else {
-		fullPath = toolPath
+	if filepath.IsAbs(toolPath) {
+		return filepath.Join(toolPath, toolName)
 	}
-	return filepath.Join(fullPath, toolName)
+	return filepath.Join(te.ctx.Root, toolPath, toolName)
 }
 
-// findExecutableInPath checks if a specific executable exists in the given path
 func (te *ToolExecutor) findExecutableInPath(toolPath, toolName string) (string, error) {
-	executablePath := te.resolveToolFullPath(toolPath, toolName)
-
-	// Check if the file exists
-	if _, err := os.Stat(executablePath); err != nil {
-		return "", fmt.Errorf("executable not found: %w", err)
+	fullPath := te.resolveToolFullPath(toolPath, toolName)
+	if te.isExecutable(fullPath) {
+		return fullPath, nil
 	}
-
-	// Check if the file is executable
-	if !te.isExecutable(executablePath) {
-		return "", fmt.Errorf("file exists but is not executable")
-	}
-
-	return executablePath, nil
+	return "", fmt.Errorf("tool '%s' not found or not executable in '%s'", toolName, toolPath)
 }
 
-// listExecutablesInPath lists all executable files in the specified path
+// findExecutable finds the executable for a given tool name in the configured tool paths
+func (te *ToolExecutor) findExecutable(toolName string) (string, error) {
+	// Handle absolute path case
+	if filepath.IsAbs(toolName) {
+		if te.isExecutable(toolName) {
+			return toolName, nil
+		}
+		return "", fmt.Errorf("executable '%s' is not a valid executable file", toolName)
+	}
+
+	// Search in tool paths
+	for _, toolPath := range te.ctx.Config.ToolPaths {
+		var fullPath string
+		if !filepath.IsAbs(toolPath) {
+			fullPath = filepath.Join(te.ctx.Root, toolPath)
+		} else {
+			fullPath = toolPath
+		}
+		executablePath := filepath.Join(fullPath, toolName)
+
+		if te.isExecutable(executablePath) {
+			return executablePath, nil
+		}
+	}
+
+	return "", fmt.Errorf("executable '%s' not found in any tool path", toolName)
+}
+
+// listExecutablesInPath scans a directory and returns a list of all executable files
 func (te *ToolExecutor) listExecutablesInPath(toolPath string) ([]string, error) {
 	var fullPath string
-	if !filepath.IsAbs(toolPath) {
-		fullPath = filepath.Join(te.ctx.Root, toolPath)
-	} else {
+	if filepath.IsAbs(toolPath) {
 		fullPath = toolPath
+	} else {
+		fullPath = filepath.Join(te.ctx.Root, toolPath)
 	}
 
-	// Check if the directory exists
-	if _, err := os.Stat(fullPath); err != nil {
-		return nil, fmt.Errorf("directory not found: %w", err)
-	}
-
-	// Read the directory
-	entries, err := os.ReadDir(fullPath)
+	files, err := os.ReadDir(fullPath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read directory: %w", err)
+		// Suppress error if path does not exist, as it's a common scenario
+		if os.IsNotExist(err) {
+			return nil, nil // Return empty list, don't propagate error
+		}
+		return nil, fmt.Errorf("failed to read directory '%s': %w", fullPath, err)
 	}
 
 	var executables []string
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			candidatePath := te.resolveToolFullPath(toolPath, entry.Name())
-			if te.isExecutable(candidatePath) {
-				executables = append(executables, entry.Name())
-			}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		// Check if the file is executable
+		if te.isExecutable(filepath.Join(fullPath, file.Name())) {
+			executables = append(executables, file.Name())
 		}
 	}
 
 	return executables, nil
 }
 
-// isExecutable checks if a file is executable
+// isExecutable checks if a file at the given path is an executable.
 func (te *ToolExecutor) isExecutable(filePath string) bool {
 	info, err := os.Stat(filePath)
 	if err != nil {
 		return false
 	}
-
-	// Check if the file has executable permissions
 	mode := info.Mode()
 	return mode.IsRegular() && (mode&0111 != 0)
 }

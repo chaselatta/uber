@@ -1,2 +1,3 @@
 tool_paths = ["bin", "scripts"]
 env_setup = "scripts/env_setup.py"
+reporting_cmd = "scripts/reporting.sh"
