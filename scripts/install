@@ -5,27 +5,28 @@
 
 set -e # Exit on any error
 
+# Source shared utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/utils.sh"
+
 # Default values
 OUTPUT_PATH=""
 VERBOSE=false
 DRY_RUN=false
 
 # Function to show help
-show_help() {
-  echo "Usage: $0 [OPTIONS]"
-  echo ""
-  echo "Options:"
-  echo "  -o, --output PATH    Specify custom installation path"
-  echo "  -v, --verbose        Enable verbose output"
-  echo "  --dry-run            Show where uber would be installed without building"
-  echo "  -h, --help           Show this help message"
-  echo ""
-  echo "The script will automatically choose an installation location:"
-  echo "  1. ~/.local/bin (if in PATH)"
-  echo "  2. ~/bin (if in PATH)"
-  echo "  3. Custom path (if specified with --output)"
-  echo "  4. Current directory (if no suitable existing location found)"
-  exit 0
+show_install_help() {
+  show_help "$0" "[OPTIONS]" \
+    "This script installs the uber binary to an appropriate location." \
+    "  -o, --output PATH    Specify custom installation path
+  -v, --verbose        Enable verbose output
+  --dry-run            Show where uber would be installed without building
+  -h, --help           Show this help message" \
+    "The script will automatically choose an installation location:
+  1. ~/.local/bin (if in PATH)
+  2. ~/bin (if in PATH)
+  3. Custom path (if specified with --output)
+  4. Current directory (if no suitable existing location found)"
 }
 
 # Function to parse command line arguments
@@ -45,7 +46,7 @@ parse_arguments() {
       shift
       ;;
     -h | --help)
-      show_help
+      show_install_help
       ;;
     *)
       echo "Unknown option: $1"
@@ -54,22 +55,6 @@ parse_arguments() {
       ;;
     esac
   done
-}
-
-# Function to setup project root
-setup_project_root() {
-  # Use UBER_PROJECT_ROOT if available (when run through uber), otherwise use current directory
-  if [ -n "$UBER_PROJECT_ROOT" ]; then
-    PROJECT_ROOT="$UBER_PROJECT_ROOT"
-    if [ "$VERBOSE" = true ]; then
-      echo "Running in uber context - using UBER_PROJECT_ROOT: $PROJECT_ROOT"
-    fi
-  else
-    PROJECT_ROOT=$(pwd)
-    if [ "$VERBOSE" = true ]; then
-      echo "Running standalone - using current directory: $PROJECT_ROOT"
-    fi
-  fi
 }
 
 # Function to check if a directory is in PATH
@@ -100,7 +85,7 @@ determine_install_location() {
     # User specified custom path
     INSTALL_PATH="$OUTPUT_PATH"
     if [ "$VERBOSE" = true ]; then
-      echo "Using custom installation path: $INSTALL_PATH"
+      print_info "Using custom installation path: $INSTALL_PATH"
     fi
   else
     # Try to find the best automatic location
@@ -109,76 +94,71 @@ determine_install_location() {
     if [ -d "$HOME/.local/bin" ] && is_in_path "$HOME/.local/bin" && is_writable "$HOME/.local/bin"; then
       INSTALL_PATH="$HOME/.local/bin/uber"
       if [ "$VERBOSE" = true ]; then
-        echo "Found ~/.local/bin in PATH and writable"
+        print_info "Found ~/.local/bin in PATH and writable"
       fi
     # Check ~/bin (common user bin directory)
     elif [ -d "$HOME/bin" ] && is_in_path "$HOME/bin" && is_writable "$HOME/bin"; then
       INSTALL_PATH="$HOME/bin/uber"
       if [ "$VERBOSE" = true ]; then
-        echo "Found ~/bin in PATH and writable"
+        print_info "Found ~/bin in PATH and writable"
       fi
     else
       # Fallback to current directory
       INSTALL_PATH="$PROJECT_ROOT/uber-installed"
       if [ "$VERBOSE" = true ]; then
-        echo "No suitable existing PATH location found, installing to: $INSTALL_PATH"
+        print_info "No suitable existing PATH location found, installing to: $INSTALL_PATH"
       fi
     fi
   fi
 
   # Create directory if it doesn't exist (for custom paths)
   INSTALL_DIR=$(dirname "$INSTALL_PATH")
-  if [ ! -d "$INSTALL_DIR" ]; then
-    if [ "$VERBOSE" = true ]; then
-      echo "Creating directory: $INSTALL_DIR"
-    fi
-    mkdir -p "$INSTALL_DIR"
-  fi
+  ensure_dir "$INSTALL_DIR" "$VERBOSE"
 
   # Check if we can write to the installation location
   if ! is_writable "$INSTALL_DIR"; then
-    echo "Error: Cannot write to installation directory: $INSTALL_DIR"
-    echo "Try running with sudo or specify a different location with --output"
+    print_error "Cannot write to installation directory: $INSTALL_DIR"
+    print_info "Try running with sudo or specify a different location with --output"
     exit 1
   fi
 }
 
 # Function to handle dry-run mode
 handle_dry_run() {
-  echo "=== Dry Run Mode ==="
-  echo "Uber would be installed to: $INSTALL_PATH"
+  print_header "=== Dry Run Mode ==="
+  print_info "Uber would be installed to: $INSTALL_PATH"
   echo ""
-  echo "Installation details:"
+  print_info "Installation details:"
   echo "  Source: $PROJECT_ROOT/cmd/uber"
   echo "  Target: $INSTALL_PATH"
   echo "  Directory: $INSTALL_DIR"
   echo ""
 
-  if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
-    echo "✓ The installation directory is in your PATH"
-    echo "  You would be able to run: uber <command>"
+  if is_in_path "$INSTALL_DIR"; then
+    print_success "The installation directory is in your PATH"
+    print_info "You would be able to run: uber <command>"
   else
-    echo "⚠ The installation directory is NOT in your PATH"
-    echo "  You would need to run: $INSTALL_PATH <command>"
+    print_warning "The installation directory is NOT in your PATH"
+    print_info "You would need to run: $INSTALL_PATH <command>"
   fi
   echo ""
-  echo "To actually install, run without --dry-run"
+  print_info "To actually install, run without --dry-run"
   exit 0
 }
 
 # Function to install the binary
 install_binary() {
-  echo "Building and installing uber to: $INSTALL_PATH"
+  print_info "Building and installing uber to: $INSTALL_PATH"
   go build -o "$INSTALL_PATH" "$PROJECT_ROOT/cmd/uber"
 
-  echo "✓ Uber installed successfully!"
+  print_success "Uber installed successfully!"
   echo ""
 
   # Verify installation
   if [ -f "$INSTALL_PATH" ] && [ -x "$INSTALL_PATH" ]; then
-    echo "✓ Installation verified: $INSTALL_PATH is executable"
+    print_success "Installation verified: $INSTALL_PATH is executable"
   else
-    echo "✗ Installation verification failed"
+    print_error "Installation verification failed"
     exit 1
   fi
 }
@@ -186,22 +166,22 @@ install_binary() {
 # Function to show installation summary
 show_installation_summary() {
   echo ""
-  echo "=== Installation Complete ==="
-  echo "Uber has been installed to: $INSTALL_PATH"
+  print_header "=== Installation Complete ==="
+  print_info "Uber has been installed to: $INSTALL_PATH"
   echo ""
 
-  if [[ ":$PATH:" == *":$INSTALL_DIR:"* ]]; then
-    echo "✓ The installation directory is in your PATH"
-    echo "You can now use uber from anywhere by running: uber <command>"
+  if is_in_path "$INSTALL_DIR"; then
+    print_success "The installation directory is in your PATH"
+    print_info "You can now use uber from anywhere by running: uber <command>"
   else
-    echo "⚠ The installation directory is NOT in your PATH"
-    echo "To use uber, you'll need to:"
+    print_warning "The installation directory is NOT in your PATH"
+    print_info "To use uber, you'll need to:"
     echo "  1. Add $INSTALL_DIR to your PATH, or"
     echo "  2. Run uber using the full path: $INSTALL_PATH <command>"
   fi
 
   echo ""
-  echo "Example usage:"
+  print_info "Example usage:"
   echo "  uber --help                    # Show help"
   echo "  uber <tool-name> [arguments]   # Run a tool"
 }
@@ -211,10 +191,10 @@ main() {
   # Parse command line arguments
   parse_arguments "$@"
 
-  # Setup project root
-  setup_project_root
+  # Change to project root
+  cd_project_root
 
-  echo "=== Uber Installation ==="
+  print_header "=== Uber Installation ==="
   echo ""
 
   # Determine installation location
