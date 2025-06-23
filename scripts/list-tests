@@ -36,26 +36,32 @@ print_header() {
   echo -e "${CYAN}$1${NC}"
 }
 
-# Use UBER_PROJECT_ROOT if available (when run through uber)
-# Otherwise fall back to calculating it from script location
-if [ -n "$UBER_PROJECT_ROOT" ]; then
-  PROJECT_ROOT="$UBER_PROJECT_ROOT"
-  print_info "Using uber project root: $PROJECT_ROOT"
-else
-  # Fallback for direct execution
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-  print_warning "UBER_PROJECT_ROOT not set, using calculated project root: $PROJECT_ROOT"
-fi
+# Function to setup project root
+setup_project_root() {
+  # Use UBER_PROJECT_ROOT if available (when run through uber)
+  # Otherwise fall back to calculating it from script location
+  if [ -n "$UBER_PROJECT_ROOT" ]; then
+    PROJECT_ROOT="$UBER_PROJECT_ROOT"
+    print_info "Using uber project root: $PROJECT_ROOT"
+  else
+    # Fallback for direct execution
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    print_warning "UBER_PROJECT_ROOT not set, using calculated project root: $PROJECT_ROOT"
+  fi
 
-# Change to project root
-cd "$PROJECT_ROOT"
+  # Change to project root
+  cd "$PROJECT_ROOT"
+}
 
-# Check if Go is available
-if ! command -v go &>/dev/null; then
-  print_error "Go is not installed or not in PATH"
-  exit 1
-fi
+# Function to check prerequisites
+check_prerequisites() {
+  # Check if Go is available
+  if ! command -v go &>/dev/null; then
+    print_error "Go is not installed or not in PATH"
+    exit 1
+  fi
+}
 
 # Function to list tests in a package
 list_tests_in_package() {
@@ -145,13 +151,25 @@ list_tests_in_pattern() {
   print_success "Total tests found: $total_tests"
 }
 
-# Main logic
-if [ $# -eq 0 ]; then
-  # No arguments provided, list all tests
-  list_all_tests
-else
-  # Arguments provided, list tests in matching packages
-  list_tests_in_pattern "$1"
-fi
+# Main function
+main() {
+  # Setup project root
+  setup_project_root
 
-print_success "Test listing completed!"
+  # Check prerequisites
+  check_prerequisites
+
+  # Main logic
+  if [ $# -eq 0 ]; then
+    # No arguments provided, list all tests
+    list_all_tests
+  else
+    # Arguments provided, list tests in matching packages
+    list_tests_in_pattern "$1"
+  fi
+
+  print_success "Test listing completed!"
+}
+
+# Call main function with all arguments
+main "$@"
