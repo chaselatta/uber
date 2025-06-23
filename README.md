@@ -7,6 +7,7 @@ Uber is a tool launcher that helps you organize and run scripts and executables 
 - **Automatic tool discovery**: Searches for executables in configured tool paths
 - **Relative and absolute paths**: Supports both relative (project-root based) and absolute tool paths
 - **Project root detection**: Automatically finds the project root by looking for a `.uber` file
+- **List all available tools**: List all executable tools found in your configured tool paths with `--list-tools`
 - **Verbose mode**: Get detailed information about tool discovery and execution with colored output
 - **Flexible configuration**: Simple TOML-based configuration
 - **Colored output**: When running in a terminal, verbose output uses colors for better readability
@@ -43,6 +44,9 @@ uber my-tool
 # Run a tool with arguments
 uber my-tool arg1 arg2
 
+# List all available tools
+uber --list-tools
+
 # Run with verbose output (colored when in terminal)
 uber --verbose my-tool arg1 arg2
 ```
@@ -51,6 +55,7 @@ uber --verbose my-tool arg1 arg2
 
 - `--root <path>`: Specify the project root directory (default: auto-detect)
 - `--verbose` or `-v`: Enable verbose output showing tool discovery process
+- `--list-tools`: List all available executable tools in the configured tool paths
 
 ### Colored Output
 
