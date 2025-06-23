@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -175,4 +176,143 @@ func TestExecuteNonExecutableFile(t *testing.T) {
 	if err == nil {
 		t.Errorf("Expected error when trying to execute non-executable file, got nil")
 	}
+}
+
+func TestExecuteToolWithEnvironmentVariables(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-env-vars")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create a temporary file to capture output
+	outputFile := filepath.Join(tempDir, "output.txt")
+
+	// Create a test executable that writes environment variables to a file
+	envTestExecutable := filepath.Join(tempDir, "env-writer-tool")
+	envWriterScript := fmt.Sprintf(`#!/bin/bash
+echo "UBER_BIN_PATH=$UBER_BIN_PATH" > %s
+echo "UBER_PROJECT_ROOT=$UBER_PROJECT_ROOT" >> %s
+if [ -n "$UBER_VERBOSE" ]; then
+    echo "UBER_VERBOSE=$UBER_VERBOSE" >> %s
+fi
+`, outputFile, outputFile, outputFile)
+
+	if err := os.WriteFile(envTestExecutable, []byte(envWriterScript), 0755); err != nil {
+		t.Fatalf("Failed to create env writer executable: %v", err)
+	}
+
+	expectedBinPath := "/usr/local/bin/uber"
+	expectedProjectRoot := "/test/project"
+
+	// Test case 1: Verbose is true
+	t.Run("VerboseTrue", func(t *testing.T) {
+		// Clean up output file
+		os.Remove(outputFile)
+
+		executor := &ToolExecutor{
+			ctx: &RunContext{
+				Root:        expectedProjectRoot,
+				UberBinPath: expectedBinPath,
+				Verbose:     true,
+				Config: &config.Config{
+					ToolPaths: []string{tempDir},
+				},
+			},
+		}
+
+		// Execute the tool that writes environment variables to a file
+		err := executor.FindAndExecuteTool("env-writer-tool", []string{})
+		if err != nil {
+			t.Fatalf("Failed to execute test tool: %v", err)
+		}
+
+		// Read the output file to verify environment variables
+		output, err := os.ReadFile(outputFile)
+		if err != nil {
+			t.Fatalf("Failed to read output file: %v", err)
+		}
+
+		outputStr := string(output)
+
+		// Check that all expected environment variables are present
+		expectedVars := map[string]string{
+			"UBER_BIN_PATH":     expectedBinPath,
+			"UBER_PROJECT_ROOT": expectedProjectRoot,
+			"UBER_VERBOSE":      "1",
+		}
+
+		for varName, expectedValue := range expectedVars {
+			expectedLine := fmt.Sprintf("%s=%s", varName, expectedValue)
+			if !contains(outputStr, expectedLine) {
+				t.Errorf("Expected environment variable line '%s' not found in output:\n%s", expectedLine, outputStr)
+			}
+		}
+	})
+
+	// Test case 2: Verbose is false
+	t.Run("VerboseFalse", func(t *testing.T) {
+		// Clean up output file
+		os.Remove(outputFile)
+
+		executor := &ToolExecutor{
+			ctx: &RunContext{
+				Root:        expectedProjectRoot,
+				UberBinPath: expectedBinPath,
+				Verbose:     false,
+				Config: &config.Config{
+					ToolPaths: []string{tempDir},
+				},
+			},
+		}
+
+		// Execute the tool that writes environment variables to a file
+		err := executor.FindAndExecuteTool("env-writer-tool", []string{})
+		if err != nil {
+			t.Fatalf("Failed to execute test tool: %v", err)
+		}
+
+		// Read the output file to verify environment variables
+		output, err := os.ReadFile(outputFile)
+		if err != nil {
+			t.Fatalf("Failed to read output file: %v", err)
+		}
+
+		outputStr := string(output)
+
+		// Check that UBER_VERBOSE is NOT present when verbose is false
+		if contains(outputStr, "UBER_VERBOSE=") {
+			t.Errorf("UBER_VERBOSE should not be set when verbose is false, but found in output:\n%s", outputStr)
+		}
+
+		// Check that other environment variables are still present
+		expectedVars := map[string]string{
+			"UBER_BIN_PATH":     expectedBinPath,
+			"UBER_PROJECT_ROOT": expectedProjectRoot,
+		}
+
+		for varName, expectedValue := range expectedVars {
+			expectedLine := fmt.Sprintf("%s=%s", varName, expectedValue)
+			if !contains(outputStr, expectedLine) {
+				t.Errorf("Expected environment variable line '%s' not found in output:\n%s", expectedLine, outputStr)
+			}
+		}
+	})
+}
+
+// Helper function to check if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
+		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
+			containsSubstring(s, substr)))
+}
+
+func containsSubstring(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }
