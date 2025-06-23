@@ -15,6 +15,7 @@ type RunContext struct {
 	Root          string
 	UberBinPath   string
 	Verbose       bool
+	ListTools     bool
 	Command       string
 	RemainingArgs []string
 	Config        *config.Config
@@ -78,6 +79,7 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 	root := fs.String("root", "", "Specify the root directory (e.g., --root /path/to/dir)")
 	verbose := fs.Bool("verbose", false, "Enable verbose output (-v or --verbose)")
 	fs.BoolVar(verbose, "v", false, "Enable verbose output (shorthand for --verbose)")
+	listTools := fs.Bool("list-tools", false, "List available tools")
 
 	if output == nil {
 		output = os.Stderr
@@ -88,7 +90,13 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 		return nil, err
 	}
 	remaining := fs.Args()
-	if len(remaining) == 0 {
+
+	// If --list-tools is specified, we don't need a command
+	if *listTools {
+		if len(remaining) > 0 {
+			return nil, fmt.Errorf("--list-tools does not accept additional arguments")
+		}
+	} else if len(remaining) == 0 {
 		return nil, fmt.Errorf("missing required positional argument 'command'")
 	}
 
@@ -113,12 +121,22 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	command := ""
+	remainingArgs := []string{}
+	if len(remaining) > 0 {
+		command = remaining[0]
+		if len(remaining) > 1 {
+			remainingArgs = remaining[1:]
+		}
+	}
+
 	return &RunContext{
 		Root:          projectRoot,
 		UberBinPath:   binPath,
 		Verbose:       *verbose,
-		Command:       remaining[0],
-		RemainingArgs: remaining[1:],
+		ListTools:     *listTools,
+		Command:       command,
+		RemainingArgs: remainingArgs,
 		Config:        config,
 	}, nil
 }

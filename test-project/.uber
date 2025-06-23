@@ -1,1 +1,1 @@
-tool_paths = ["bin", "scripts", "/usr/local/bin"] 
+tool_paths = ["bin", "scripts"] 

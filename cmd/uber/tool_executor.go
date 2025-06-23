@@ -19,57 +19,76 @@ func NewToolExecutor(ctx *RunContext) *ToolExecutor {
 	}
 }
 
-// FindAndExecuteTool searches for the specified tool in the configured tool paths
-// and executes it with the given arguments
-func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error {
+// AvailableTool represents a tool that can be executed
+type AvailableTool struct {
+	Name string
+	Path string
+}
+
+// GetAllAvailableTools scans all configured tool paths and returns all executable tools
+// in the order they appear in the tool_paths configuration
+func (te *ToolExecutor) GetAllAvailableTools() ([]AvailableTool, error) {
 	// If no tool paths configured, return error
 	if te.ctx.Config.ToolPaths == nil || len(te.ctx.Config.ToolPaths) == 0 {
-		return fmt.Errorf("no tool paths configured in .uber file")
+		return nil, fmt.Errorf("no tool paths configured in .uber file")
 	}
 
-	// Search for the tool in each configured path
+	var allTools []AvailableTool
+
+	// Search for tools in each configured path in order
 	for _, toolPath := range te.ctx.Config.ToolPaths {
-		executablePath, err := te.findExecutableInPath(toolPath, toolName)
+		tools, err := te.listExecutablesInPath(toolPath)
 		if err != nil {
 			if te.ctx.Verbose {
-				ColorPrint(ColorYellow, fmt.Sprintf("Tool '%s' not found in path '%s': %v\n", toolName, toolPath, err))
+				ColorPrint(ColorYellow, fmt.Sprintf("Error scanning path '%s': %v\n", toolPath, err))
 			}
 			continue
 		}
 
-		// Found the executable, execute it
-		if te.ctx.Verbose {
-			ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' at: %s\n", toolName, executablePath))
-			ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
+		// Add tools from this path to the list
+		for _, toolName := range tools {
+			allTools = append(allTools, AvailableTool{
+				Name: toolName,
+				Path: toolPath,
+			})
 		}
+	}
 
-		return te.executeTool(executablePath, args)
+	return allTools, nil
+}
+
+// FindAndExecuteTool searches for the specified tool in the configured tool paths
+// and executes it with the given arguments
+func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error {
+	// Get all available tools
+	availableTools, err := te.GetAllAvailableTools()
+	if err != nil {
+		return err
+	}
+
+	// Find the first occurrence of the tool (honoring tool_paths order)
+	for _, tool := range availableTools {
+		if tool.Name == toolName {
+			// Found the tool, execute it
+			if te.ctx.Verbose {
+				ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' in path '%s'\n", toolName, tool.Path))
+				ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
+			}
+
+			// Construct the full path to the executable
+			var fullPath string
+			if !filepath.IsAbs(tool.Path) {
+				fullPath = filepath.Join(te.ctx.Root, tool.Path)
+			} else {
+				fullPath = tool.Path
+			}
+			executablePath := filepath.Join(fullPath, toolName)
+
+			return te.executeTool(executablePath, args)
+		}
 	}
 
 	return fmt.Errorf("tool '%s' not found in any configured tool path", toolName)
-}
-
-// findExecutableInPath looks for an executable with the given name in the specified path
-func (te *ToolExecutor) findExecutableInPath(toolPath, toolName string) (string, error) {
-	var fullPath string
-
-	// If the path is relative, make it relative to the project root
-	if !filepath.IsAbs(toolPath) {
-		fullPath = filepath.Join(te.ctx.Root, toolPath)
-	} else {
-		fullPath = toolPath
-	}
-
-	// Construct the full path to the executable
-	executablePath := filepath.Join(fullPath, toolName)
-
-	// Check if the file exists
-	// Let exec.Command handle executability validation at runtime
-	if _, err := os.Stat(executablePath); err != nil {
-		return "", fmt.Errorf("file not found: %w", err)
-	}
-
-	return executablePath, nil
 }
 
 // executeTool executes the tool with the given arguments
@@ -103,4 +122,78 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string) error 
 	}
 
 	return cmd.Run()
+}
+
+// ListAvailableTools scans all configured tool paths and lists all executable tools
+func (te *ToolExecutor) ListAvailableTools() error {
+	// Get all available tools
+	availableTools, err := te.GetAllAvailableTools()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Available tools:")
+	fmt.Println()
+
+	// Group tools by path for display
+	currentPath := ""
+	for _, tool := range availableTools {
+		if tool.Path != currentPath {
+			if currentPath != "" {
+				fmt.Println()
+			}
+			ColorPrint(ColorCyan, fmt.Sprintf("From %s:\n", tool.Path))
+			currentPath = tool.Path
+		}
+		fmt.Printf("  %s\n", tool.Name)
+	}
+
+	return nil
+}
+
+// listExecutablesInPath lists all executable files in the specified path
+func (te *ToolExecutor) listExecutablesInPath(toolPath string) ([]string, error) {
+	var fullPath string
+
+	// If the path is relative, make it relative to the project root
+	if !filepath.IsAbs(toolPath) {
+		fullPath = filepath.Join(te.ctx.Root, toolPath)
+	} else {
+		fullPath = toolPath
+	}
+
+	// Check if the directory exists
+	if _, err := os.Stat(fullPath); err != nil {
+		return nil, fmt.Errorf("directory not found: %w", err)
+	}
+
+	// Read the directory
+	entries, err := os.ReadDir(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read directory: %w", err)
+	}
+
+	var executables []string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			// Check if the file is executable
+			if te.isExecutable(filepath.Join(fullPath, entry.Name())) {
+				executables = append(executables, entry.Name())
+			}
+		}
+	}
+
+	return executables, nil
+}
+
+// isExecutable checks if a file is executable
+func (te *ToolExecutor) isExecutable(filePath string) bool {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return false
+	}
+
+	// Check if the file has executable permissions
+	mode := info.Mode()
+	return mode.IsRegular() && (mode&0111 != 0)
 }

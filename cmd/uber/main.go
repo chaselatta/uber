@@ -25,6 +25,15 @@ func main() {
 	// Create tool executor
 	executor := NewToolExecutor(ctx)
 
+	// Handle --list-tools flag
+	if ctx.ListTools {
+		if err := executor.ListAvailableTools(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	// Find and execute the tool
 	if err := executor.FindAndExecuteTool(ctx.Command, ctx.RemainingArgs); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
