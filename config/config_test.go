@@ -16,12 +16,12 @@ func TestLoad(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name: "valid tool_paths and env_setup_script",
+			name: "valid tool_paths and env_setup",
 			tomlContent: `tool_paths = ["/usr/local/bin", "bin"]
-env_setup_script = "/path/to/setup.sh"`,
+env_setup = "/path/to/setup.sh"`,
 			want: &Config{
-				ToolPaths:      []string{"/usr/local/bin", "bin"},
-				EnvSetupScript: "/path/to/setup.sh",
+				ToolPaths: []string{"/usr/local/bin", "bin"},
+				EnvSetup:  "/path/to/setup.sh",
 			},
 			wantErr: false,
 		},
@@ -66,27 +66,27 @@ env_setup_script = "/path/to/setup.sh"`,
 			wantErr: false,
 		},
 		{
-			name:        "valid env setup script only",
-			tomlContent: `env_setup_script = "scripts/setup.sh"`,
+			name:        "valid env setup only",
+			tomlContent: `env_setup = "scripts/setup.sh"`,
 			want: &Config{
-				EnvSetupScript: "scripts/setup.sh",
+				EnvSetup: "scripts/setup.sh",
 			},
 			wantErr: false,
 		},
 		{
-			name:        "empty_env_setup_script",
-			tomlContent: `env_setup_script = ""`,
+			name:        "empty_env_setup",
+			tomlContent: `env_setup = ""`,
 			want: &Config{
-				EnvSetupScript: "",
+				EnvSetup: "",
 			},
 			wantErr: false,
 		},
 		{
-			name:        "missing_env_setup_script",
+			name:        "missing_env_setup",
 			tomlContent: `tool_paths = ["/usr/bin"]`,
 			want: &Config{
-				ToolPaths:      []string{"/usr/bin"},
-				EnvSetupScript: "",
+				ToolPaths: []string{"/usr/bin"},
+				EnvSetup:  "",
 			},
 			wantErr: false,
 		},
@@ -118,11 +118,11 @@ func TestLoadFromFile(t *testing.T) {
 	// Test LoadFromFile with a temporary file
 	tomlContent := `
 tool_paths = ["/usr/local/bin", "bin", "tools"]
-env_setup_script = "/path/to/env.sh"
+env_setup = "/path/to/env.sh"
 `
 	expectedConfig := &Config{
-		ToolPaths:      []string{"/usr/local/bin", "bin", "tools"},
-		EnvSetupScript: "/path/to/env.sh",
+		ToolPaths: []string{"/usr/local/bin", "bin", "tools"},
+		EnvSetup:  "/path/to/env.sh",
 	}
 
 	// Create temporary directory with .uber file

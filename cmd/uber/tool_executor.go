@@ -79,7 +79,7 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 			}
 
 			// Execute the env setup script if it's defined
-			env, err := te.executeEnvSetupScript()
+			env, err := te.executeEnvSetup()
 			if err != nil {
 				return fmt.Errorf("failed to execute env setup script: %w", err)
 			}
@@ -100,15 +100,15 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 	return fmt.Errorf("tool '%s' not found in any configured tool path", toolName)
 }
 
-// executeEnvSetupScript executes the environment setup script if it is defined
+// executeEnvSetup executes the environment setup script if it is defined
 // in the .uber configuration file and returns the resulting environment.
-func (te *ToolExecutor) executeEnvSetupScript() ([]string, error) {
-	if te.ctx.Config.EnvSetupScript == "" {
+func (te *ToolExecutor) executeEnvSetup() ([]string, error) {
+	if te.ctx.Config.EnvSetup == "" {
 		return nil, nil // No script defined
 	}
 
 	// Resolve the script path
-	scriptPath := te.ctx.Config.EnvSetupScript
+	scriptPath := te.ctx.Config.EnvSetup
 	if !filepath.IsAbs(scriptPath) {
 		scriptPath = filepath.Join(te.ctx.Root, scriptPath)
 	}
@@ -121,11 +121,9 @@ func (te *ToolExecutor) executeEnvSetupScript() ([]string, error) {
 		return nil, fmt.Errorf("script '%s' is not executable", scriptPath)
 	}
 
-	// Create the command to execute the script and capture its environment.
-	// We source the script and then run `env` to get all environment variables.
-	commandStr := fmt.Sprintf(". %s && env", scriptPath)
-	cmd := exec.Command("sh", "-c", commandStr)
-
+	// Execute the script directly. It is expected to print environment variables
+	// to stdout, one per line, in KEY=VALUE format.
+	cmd := exec.Command(scriptPath)
 	cmd.Env = te.prepareEnvironment()
 
 	var stdout bytes.Buffer
@@ -141,13 +139,27 @@ func (te *ToolExecutor) executeEnvSetupScript() ([]string, error) {
 		return nil, fmt.Errorf("error executing env setup script '%s': %w", scriptPath, err)
 	}
 
-	// Parse the output of `env` into a slice of strings, filtering for valid env vars
-	var validEnvVars []string
+	// The current environment
+	currentEnv := te.prepareEnvironment()
+	envMap := make(map[string]string)
+	for _, v := range currentEnv {
+		parts := strings.SplitN(v, "=", 2)
+		if len(parts) == 2 {
+			envMap[parts[0]] = parts[1]
+		}
+	}
+
+	// Parse the output of the script and update the environment
 	scanner := bufio.NewScanner(&stdout)
 	for scanner.Scan() {
 		line := scanner.Text()
-		if strings.Contains(line, "=") {
-			validEnvVars = append(validEnvVars, line)
+		if !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 {
+			key, value := parts[0], parts[1]
+			envMap[key] = value
 		}
 	}
 
@@ -155,7 +167,13 @@ func (te *ToolExecutor) executeEnvSetupScript() ([]string, error) {
 		return nil, fmt.Errorf("error reading env setup script output: %w", err)
 	}
 
-	return validEnvVars, nil
+	// Convert the map back to a slice of strings
+	var newEnv []string
+	for key, value := range envMap {
+		newEnv = append(newEnv, fmt.Sprintf("%s=%s", key, value))
+	}
+
+	return newEnv, nil
 }
 
 // executeTool executes the tool with the given arguments

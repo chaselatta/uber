@@ -1,2 +1,2 @@
 tool_paths = ["bin", "scripts"]
-env_setup_script = "scripts/env_setup.sh"
+env_setup = "scripts/env_setup.py"

@@ -28,6 +28,42 @@ Create a `.uber` file in your project root with the following TOML format:
 tool_paths = ["bin", "scripts", "/usr/local/bin", "./tools"]
 ```
 
+### Environment Setup Script
+
+You can define an environment setup script that will be executed before your tool is run. This is useful for setting up any environment variables that your tools might need.
+
+The `env_setup` key in your `.uber` file specifies the path to this script (relative to the project root).
+
+**Contract:**
+- The script at `env_setup` must be an executable file.
+- It can be written in any language (e.g., Shell, Python, Ruby).
+- It must print environment variables to standard output, one per line, in `KEY=VALUE` format.
+
+**Example `.uber` configuration:**
+
+```toml
+tool_paths = ["bin", "scripts"]
+env_setup = "scripts/env_setup.sh"
+```
+
+**Example `env_setup.sh`:**
+```sh
+#!/bin/sh
+echo "MY_APP_NAME=My Awesome App"
+echo "MY_APP_VERSION=1.2.3"
+```
+
+**Example `env_setup.py`:**
+```python
+#!/usr/bin/env python3
+import os
+
+print(f"MY_APP_NAME=My Awesome App")
+print(f"MY_APP_VERSION=1.2.3")
+```
+
+The environment variables `MY_APP_NAME` and `MY_APP_VERSION` will be available to any tool executed by `uber`.
+
 ### Tool Paths
 
 - **Relative paths** (e.g., `"bin"`, `"scripts"`, `"./tools"`): Searched relative to the project root

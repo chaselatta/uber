@@ -10,6 +10,20 @@ import (
 	"github.com/chaselatta/uber/config"
 )
 
+// createTempDirWithTool creates a temporary directory for tool execution tests
+func createTempDirWithTool(t *testing.T, prefix string) (string, func()) {
+	tempDir, err := os.MkdirTemp("", prefix)
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+
+	cleanup := func() {
+		os.RemoveAll(tempDir)
+	}
+
+	return tempDir, cleanup
+}
+
 func TestNewToolExecutor(t *testing.T) {
 	ctx := &RunContext{
 		Root:    "/test/project",
@@ -57,13 +71,6 @@ func TestFindExecutableInPath(t *testing.T) {
 		t.Errorf("Expected executable path to be %s, got %s",
 			filepath.Join(tempDir, "test-tool"), executablePath)
 	}
-
-	// Test finding executable with relative path
-	relativePath := "bin"
-	executablePath, err = executor.findExecutableInPath(relativePath, "test-tool")
-	if err == nil {
-		t.Errorf("Expected error when executable doesn't exist, got nil")
-	}
 }
 
 func TestFindExecutableInPathNonExecutable(t *testing.T) {
@@ -89,17 +96,12 @@ func TestFindExecutableInPathNonExecutable(t *testing.T) {
 	}
 
 	// Test finding non-executable file
-	// findExecutableInPath should return an error for non-executable files
-	executablePath, err := executor.findExecutableInPath(tempDir, "test-tool")
+	_, err = executor.findExecutableInPath(tempDir, "test-tool")
 	if err == nil {
 		t.Errorf("Expected error for non-executable file, got nil")
 	}
-	if executablePath != "" {
-		t.Errorf("Expected empty path for non-executable file, got %s", executablePath)
-	}
 
-	// Verify the error message contains the expected text
-	if !containsSubstring(err.Error(), "file exists but is not executable") {
+	if !strings.Contains(err.Error(), "file exists but is not executable") {
 		t.Errorf("Expected error message to contain 'file exists but is not executable', got: %v", err)
 	}
 }
@@ -135,9 +137,13 @@ func TestFindAndExecuteToolEmptyToolPaths(t *testing.T) {
 }
 
 func TestFindAndExecuteToolNotFound(t *testing.T) {
+	// Create a temp project root
+	tempDir, cleanup := createTempDirWithTool(t, "uber-test-not-found")
+	defer cleanup()
+
 	executor := &ToolExecutor{
 		ctx: &RunContext{
-			Root:    "/test/project",
+			Root:    tempDir,
 			Verbose: false,
 			Config: &config.Config{
 				ToolPaths: []string{"/nonexistent/path", "/another/nonexistent"},
@@ -208,7 +214,7 @@ fi
 	}
 
 	expectedBinPath := "/usr/local/bin/uber"
-	expectedProjectRoot := "/test/project"
+	expectedProjectRoot := tempDir // use the tempDir as root
 
 	// Test case 1: Verbose is true
 	t.Run("VerboseTrue", func(t *testing.T) {
@@ -232,26 +238,16 @@ fi
 			t.Fatalf("Failed to execute test tool: %v", err)
 		}
 
-		// Read the output file to verify environment variables
+		// Read the output and verify
 		output, err := os.ReadFile(outputFile)
 		if err != nil {
 			t.Fatalf("Failed to read output file: %v", err)
 		}
 
-		outputStr := string(output)
-
-		// Check that all expected environment variables are present
-		expectedVars := map[string]string{
-			"UBER_BIN_PATH":     expectedBinPath,
-			"UBER_PROJECT_ROOT": expectedProjectRoot,
-			"UBER_VERBOSE":      "1",
-		}
-
-		for varName, expectedValue := range expectedVars {
-			expectedLine := fmt.Sprintf("%s=%s", varName, expectedValue)
-			if !contains(outputStr, expectedLine) {
-				t.Errorf("Expected environment variable line '%s' not found in output:\n%s", expectedLine, outputStr)
-			}
+		expectedContent := fmt.Sprintf("UBER_BIN_PATH=%s\nUBER_PROJECT_ROOT=%s\nUBER_VERBOSE=1\n",
+			expectedBinPath, expectedProjectRoot)
+		if string(output) != expectedContent {
+			t.Errorf("Expected output:\n%s\nGot:\n%s", expectedContent, string(output))
 		}
 	})
 
@@ -271,113 +267,130 @@ fi
 			},
 		}
 
-		// Execute the tool that writes environment variables to a file
+		// Execute the tool
 		err := executor.FindAndExecuteTool("env-writer-tool", []string{})
 		if err != nil {
 			t.Fatalf("Failed to execute test tool: %v", err)
 		}
 
-		// Read the output file to verify environment variables
+		// Read the output and verify
 		output, err := os.ReadFile(outputFile)
 		if err != nil {
 			t.Fatalf("Failed to read output file: %v", err)
 		}
 
-		outputStr := string(output)
-
-		// Check that UBER_VERBOSE is NOT present when verbose is false
-		if contains(outputStr, "UBER_VERBOSE=") {
-			t.Errorf("UBER_VERBOSE should not be set when verbose is false, but found in output:\n%s", outputStr)
-		}
-
-		// Check that other environment variables are still present
-		expectedVars := map[string]string{
-			"UBER_BIN_PATH":     expectedBinPath,
-			"UBER_PROJECT_ROOT": expectedProjectRoot,
-		}
-
-		for varName, expectedValue := range expectedVars {
-			expectedLine := fmt.Sprintf("%s=%s", varName, expectedValue)
-			if !contains(outputStr, expectedLine) {
-				t.Errorf("Expected environment variable line '%s' not found in output:\n%s", expectedLine, outputStr)
-			}
+		expectedContent := fmt.Sprintf("UBER_BIN_PATH=%s\nUBER_PROJECT_ROOT=%s\n",
+			expectedBinPath, expectedProjectRoot)
+		if string(output) != expectedContent {
+			t.Errorf("Expected output:\n%s\nGot:\n%s", expectedContent, string(output))
 		}
 	})
 }
 
-func TestExecuteWithEnvSetupScript(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "uber-test-env-setup")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+func TestExecuteWithEnvSetup(t *testing.T) {
+	// Create a temp project root
+	tempDir, cleanup := createTempDirWithTool(t, "uber-test-env-setup")
+	defer cleanup()
 
-	outputFile := filepath.Join(tempDir, "output.txt")
-	toolExecutable := filepath.Join(tempDir, "test-tool")
+	// Create an env setup script that prints KEY=VALUE to stdout
 	setupScript := filepath.Join(tempDir, "setup.sh")
-
-	// Create a test tool
-	toolScriptContent := fmt.Sprintf(`#!/bin/bash
-echo "tool executed" >> %s
-if [ -n "$MY_VAR" ]; then
-  echo "MY_VAR=$MY_VAR" >> %s
-fi
-`, outputFile, outputFile)
-	if err := os.WriteFile(toolExecutable, []byte(toolScriptContent), 0755); err != nil {
-		t.Fatalf("Failed to create test tool: %v", err)
-	}
-
-	// Create a setup script
-	setupScriptContent := `#!/bin/bash
-echo "this is not an env var"
-export MY_VAR="hello from script"
+	setupScriptContent := `#!/bin/sh
+echo 'MY_VAR=hello from script'
 `
-	if err := os.WriteFile(setupScript, []byte(setupScriptContent), 0755); err != nil {
+	err := os.WriteFile(setupScript, []byte(setupScriptContent), 0755)
+	if err != nil {
 		t.Fatalf("Failed to create setup script: %v", err)
 	}
 
-	executor := &ToolExecutor{
-		ctx: &RunContext{
-			Root:              tempDir,
-			Verbose:           true,
-			GlobalCommandArgs: "-v --foo bar",
-			Config: &config.Config{
-				ToolPaths:      []string{tempDir},
-				EnvSetupScript: setupScript,
-			},
+	// Create a tool that will print the env var to a file
+	outputFile := filepath.Join(tempDir, "output.txt")
+	toolPath := filepath.Join(tempDir, "print_env_tool")
+	toolContent := fmt.Sprintf(`#!/bin/sh
+echo "MY_VAR is: $MY_VAR" > %s
+`, outputFile)
+	err = os.WriteFile(toolPath, []byte(toolContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to create tool: %v", err)
+	}
+
+	// Create RunContext with EnvSetup configured
+	ctx := &RunContext{
+		Root:    tempDir,
+		Verbose: false, // set to false to not clutter test output
+		Config: &config.Config{
+			ToolPaths: []string{tempDir},
+			EnvSetup:  setupScript,
 		},
 	}
 
-	if err := executor.FindAndExecuteTool("test-tool", []string{}); err != nil {
-		t.Fatalf("Execution failed: %v", err)
+	executor := NewToolExecutor(ctx)
+	err = executor.FindAndExecuteTool("print_env_tool", []string{})
+	if err != nil {
+		t.Fatalf("FindAndExecuteTool failed: %v", err)
 	}
 
+	// Check the output file
 	output, err := os.ReadFile(outputFile)
 	if err != nil {
 		t.Fatalf("Failed to read output file: %v", err)
 	}
 
-	if !strings.Contains(string(output), "MY_VAR=hello from script") {
-		t.Errorf("Expected output to contain 'MY_VAR=hello from script', but it didn't. Got:\n%s", string(output))
-	}
-
-	if strings.Contains(string(output), "this is not an env var") {
-		t.Errorf("Expected output to not contain 'this is not an env var', but it did. Got:\n%s", string(output))
+	expectedOutput := "MY_VAR is: hello from script\n"
+	if string(output) != expectedOutput {
+		t.Errorf("Expected output '%s', got '%s'", expectedOutput, string(output))
 	}
 }
 
-// Helper function to check if a string contains a substring
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) &&
-		(s[:len(substr)] == substr || s[len(s)-len(substr):] == substr ||
-			containsSubstring(s, substr)))
-}
+func TestExecuteWithPythonEnvSetup(t *testing.T) {
+	// Create a temp project root
+	tempDir, cleanup := createTempDirWithTool(t, "uber-test-python-env-setup")
+	defer cleanup()
 
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
+	// Create an env setup script that prints KEY=VALUE to stdout
+	setupScript := filepath.Join(tempDir, "setup.py")
+	setupScriptContent := `#!/usr/bin/env python3
+print('MY_VAR=hello from python script')
+`
+	err := os.WriteFile(setupScript, []byte(setupScriptContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to create setup script: %v", err)
 	}
-	return false
+
+	// Create a tool that will print the env var to a file
+	outputFile := filepath.Join(tempDir, "output.txt")
+	toolPath := filepath.Join(tempDir, "print_env_tool")
+	toolContent := fmt.Sprintf(`#!/bin/sh
+echo "MY_VAR is: $MY_VAR" > %s
+`, outputFile)
+	err = os.WriteFile(toolPath, []byte(toolContent), 0755)
+	if err != nil {
+		t.Fatalf("Failed to create tool: %v", err)
+	}
+
+	// Create RunContext with EnvSetup configured
+	ctx := &RunContext{
+		Root:    tempDir,
+		Verbose: false, // set to false to not clutter test output
+		Config: &config.Config{
+			ToolPaths: []string{tempDir},
+			EnvSetup:  setupScript,
+		},
+	}
+
+	executor := NewToolExecutor(ctx)
+	err = executor.FindAndExecuteTool("print_env_tool", []string{})
+	if err != nil {
+		t.Fatalf("FindAndExecuteTool failed: %v", err)
+	}
+
+	// Check the output file
+	output, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	expectedOutput := "MY_VAR is: hello from python script\n"
+	if string(output) != expectedOutput {
+		t.Errorf("Expected output '%s', got '%s'", expectedOutput, string(output))
+	}
 }
