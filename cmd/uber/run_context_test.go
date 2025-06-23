@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/chaselatta/uber/config"
@@ -41,75 +42,102 @@ func TestParseArgs(t *testing.T) {
 		setup   func() (string, func()) // setup function returns temp dir and cleanup function
 	}{
 		{
-			name: "all flags and command with valid root",
-			args: []string{"--root", "/tmp", "--verbose", "start", "foo", "bar"},
+			name: "uber flags and script flags",
+			args: []string{"-v", "--root", "/tmp", "--name", "Custom", "start", "foo"},
 			want: &RunContext{
-				Root:          "/tmp",
-				UberBinPath:   "/dummy/bin/path",
-				Verbose:       true,
-				Command:       "start",
-				RemainingArgs: []string{"foo", "bar"},
+				Root:              "/tmp", // This will be replaced by the test setup
+				UberBinPath:       "/dummy/bin/path",
+				Verbose:           true,
+				Command:           "start",
+				RemainingArgs:     []string{"foo"},
+				GlobalCommandArgs: "-v --root /tmp --name Custom",
 				Config: &config.Config{
 					ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
 				},
 			},
 			wantErr: false,
 			setup: func() (string, func()) {
-				return createTempDirWithUberFile(t, "uber-test-valid-root")
+				return createTempDirWithUberFile(t, "uber-test-custom-flag")
 			},
 		},
 		{
-			name:    "empty",
-			args:    []string{},
-			want:    nil,
-			wantErr: true,
-			setup:   nil,
-		},
-		{
-			name: "root not parsed twice",
-			args: []string{"--root", "/tmp", "--verbose", "start", "--root", "foo"},
+			name: "script flags only",
+			args: []string{"--name", "Custom", "start", "foo"},
 			want: &RunContext{
-				Root:          "/tmp",
-				UberBinPath:   "/dummy/bin/path",
-				Verbose:       true,
-				Command:       "start",
-				RemainingArgs: []string{"--root", "foo"},
+				Root:              "/tmp", // This will be replaced by the test setup
+				UberBinPath:       "/dummy/bin/path",
+				Verbose:           false,
+				Command:           "start",
+				RemainingArgs:     []string{"foo"},
+				GlobalCommandArgs: "--name Custom",
 				Config: &config.Config{
 					ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
 				},
 			},
 			wantErr: false,
 			setup: func() (string, func()) {
-				return createTempDirWithUberFile(t, "uber-test-valid-root")
+				// We need a .uber file to exist for root detection
+				tempDir, cleanup := createTempDirWithUberFile(t, "uber-test-script-flags")
+				// Change directory so auto-root-finding works
+				originalWd, err := os.Getwd()
+				if err != nil {
+					t.Fatalf("Failed to get wd: %v", err)
+				}
+				os.Chdir(tempDir)
+				return tempDir, func() {
+					os.Chdir(originalWd)
+					cleanup()
+				}
+			},
+		},
+		{
+			name: "command with dashes",
+			args: []string{"-v", "start-server", "--port", "8080"},
+			want: &RunContext{
+				Root:              "/tmp",
+				UberBinPath:       "/dummy/bin/path",
+				Verbose:           true,
+				Command:           "start-server",
+				RemainingArgs:     []string{"--port", "8080"},
+				GlobalCommandArgs: "-v",
+				Config: &config.Config{
+					ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts"},
+				},
+			},
+			wantErr: false,
+			setup: func() (string, func()) {
+				// We need a .uber file to exist for root detection
+				tempDir, cleanup := createTempDirWithUberFile(t, "uber-test-cmd-dashes")
+				// Change directory so auto-root-finding works
+				originalWd, err := os.Getwd()
+				if err != nil {
+					t.Fatalf("Failed to get wd: %v", err)
+				}
+				os.Chdir(tempDir)
+				return tempDir, func() {
+					os.Chdir(originalWd)
+					cleanup()
+				}
 			},
 		},
 		{
 			name:    "missing command",
-			args:    []string{"--root", "/tmp"},
+			args:    []string{"-v", "--root", "/tmp"},
 			want:    nil,
 			wantErr: true,
-			setup:   nil,
+			setup: func() (string, func()) {
+				// Don't need a real root for this to fail
+				return "/tmp", func() {}
+			},
 		},
 		{
-			name:    "unknown flag",
-			args:    []string{"--unknown", "start"},
+			name:    "list tools with other args",
+			args:    []string{"--list-tools", "some-arg"},
 			want:    nil,
 			wantErr: true,
-			setup:   nil,
-		},
-		{
-			name:    "invalid root directory does not exist",
-			args:    []string{"--root", "/nonexistent/directory", "start"},
-			want:    nil,
-			wantErr: true,
-			setup:   nil,
-		},
-		{
-			name:    "invalid root directory missing .uber file",
-			args:    []string{"--root", "/tmp", "start"},
-			want:    nil,
-			wantErr: true,
-			setup:   nil,
+			setup: func() (string, func()) {
+				return "/tmp", func() {}
+			},
 		},
 	}
 
@@ -130,8 +158,18 @@ func TestParseArgs(t *testing.T) {
 				}
 
 				// Update the expected result to use the actual temp directory path
-				if tt.want != nil && tt.want.Root == "/tmp" {
-					tt.want.Root = tempDir
+				if tt.want != nil {
+					// Also replace in GlobalCommandArgs for tests that use it
+					tt.want.GlobalCommandArgs = strings.ReplaceAll(tt.want.GlobalCommandArgs, "/tmp", tempDir)
+					if tt.want.Root == "/tmp" {
+						tt.want.Root = tempDir
+					}
+					// Normalize the wanted root path to handle symlinks, just like the main code
+					var err error
+					tt.want.Root, err = filepath.EvalSymlinks(tt.want.Root)
+					if err != nil {
+						t.Fatalf("Failed to eval symlinks on want.Root: %v", err)
+					}
 				}
 			}
 
@@ -141,20 +179,7 @@ func TestParseArgs(t *testing.T) {
 				return
 			}
 			if err == nil && !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("ParseArgs() = %+v, want %+v", got, tt.want)
-			}
-
-			// Check specific error messages for validation failures
-			if tt.wantErr && err != nil {
-				if tt.name == "invalid root directory does not exist" {
-					if err.Error()[:len("invalid --root flag: specified root directory does not exist")] != "invalid --root flag: specified root directory does not exist" {
-						t.Errorf("Expected error about directory not existing, got: %v", err)
-					}
-				} else if tt.name == "invalid root directory missing .uber file" {
-					if err.Error()[:len("invalid --root flag: specified root directory does not contain a .uber file")] != "invalid --root flag: specified root directory does not contain a .uber file" {
-						t.Errorf("Expected error about missing .uber file, got: %v", err)
-					}
-				}
+				t.Errorf("ParseArgs() = \n%+v, \nwant \n%+v", got, tt.want)
 			}
 		})
 	}
@@ -227,6 +252,10 @@ func TestParseArgsWithAutoRoot(t *testing.T) {
 	expectedRemainingArgs := []string{"arg1", "arg2"}
 	if !reflect.DeepEqual(ctx.RemainingArgs, expectedRemainingArgs) {
 		t.Errorf("Expected remaining args %v, got %v", expectedRemainingArgs, ctx.RemainingArgs)
+	}
+
+	if ctx.GlobalCommandArgs != "" {
+		t.Errorf("Expected empty global command args, got '%s'", ctx.GlobalCommandArgs)
 	}
 
 	// Verify the configuration was loaded

@@ -3,6 +3,14 @@
 echo "=== Uber Environment Variables Demo ==="
 echo ""
 
+echo "Demonstrating environment variable from env_setup_script:"
+if [ -n "$DEMO_GREETING" ]; then
+  echo "   ✓ DEMO_GREETING is set to: '$DEMO_GREETING'"
+else
+  echo "   ✗ DEMO_GREETING is not set."
+fi
+echo ""
+
 echo "1. Basic environment variables:"
 echo "   UBER_BIN_PATH: $UBER_BIN_PATH"
 echo "   UBER_PROJECT_ROOT: $UBER_PROJECT_ROOT"

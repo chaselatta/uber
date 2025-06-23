@@ -11,7 +11,8 @@ import (
 
 // Config holds the configuration from the .uber TOML file
 type Config struct {
-	ToolPaths []string `toml:"tool_paths"`
+	ToolPaths      []string `toml:"tool_paths"`
+	EnvSetupScript string   `toml:"env_setup_script"`
 }
 
 // Load loads the TOML configuration from an io.Reader

@@ -16,7 +16,17 @@ func TestLoad(t *testing.T) {
 		wantErr     bool
 	}{
 		{
-			name:        "valid tool_paths with mixed relative and absolute",
+			name: "valid tool_paths and env_setup_script",
+			tomlContent: `tool_paths = ["/usr/local/bin", "bin"]
+env_setup_script = "/path/to/setup.sh"`,
+			want: &Config{
+				ToolPaths:      []string{"/usr/local/bin", "bin"},
+				EnvSetupScript: "/path/to/setup.sh",
+			},
+			wantErr: false,
+		},
+		{
+			name:        "valid_tool_paths_with_mixed_relative_and_absolute",
 			tomlContent: `tool_paths = ["/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts", "../external-tools"]`,
 			want: &Config{
 				ToolPaths: []string{"/usr/local/bin", "bin", "tools", "/opt/tools", "./scripts", "../external-tools"},
@@ -56,7 +66,32 @@ func TestLoad(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:        "malformed TOML",
+			name:        "valid env setup script only",
+			tomlContent: `env_setup_script = "scripts/setup.sh"`,
+			want: &Config{
+				EnvSetupScript: "scripts/setup.sh",
+			},
+			wantErr: false,
+		},
+		{
+			name:        "empty_env_setup_script",
+			tomlContent: `env_setup_script = ""`,
+			want: &Config{
+				EnvSetupScript: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:        "missing_env_setup_script",
+			tomlContent: `tool_paths = ["/usr/bin"]`,
+			want: &Config{
+				ToolPaths:      []string{"/usr/bin"},
+				EnvSetupScript: "",
+			},
+			wantErr: false,
+		},
+		{
+			name:        "malformed_toml",
 			tomlContent: `tool_paths = [`,
 			want:        nil,
 			wantErr:     true,
@@ -81,9 +116,13 @@ func TestLoad(t *testing.T) {
 
 func TestLoadFromFile(t *testing.T) {
 	// Test LoadFromFile with a temporary file
-	tomlContent := `tool_paths = ["/usr/local/bin", "bin", "tools"]`
+	tomlContent := `
+tool_paths = ["/usr/local/bin", "bin", "tools"]
+env_setup_script = "/path/to/env.sh"
+`
 	expectedConfig := &Config{
-		ToolPaths: []string{"/usr/local/bin", "bin", "tools"},
+		ToolPaths:      []string{"/usr/local/bin", "bin", "tools"},
+		EnvSetupScript: "/path/to/env.sh",
 	}
 
 	// Create temporary directory with .uber file

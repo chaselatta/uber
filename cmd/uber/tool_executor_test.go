@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/chaselatta/uber/config"
@@ -302,6 +303,67 @@ fi
 			}
 		}
 	})
+}
+
+func TestExecuteWithEnvSetupScript(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "uber-test-env-setup")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	outputFile := filepath.Join(tempDir, "output.txt")
+	toolExecutable := filepath.Join(tempDir, "test-tool")
+	setupScript := filepath.Join(tempDir, "setup.sh")
+
+	// Create a test tool
+	toolScriptContent := fmt.Sprintf(`#!/bin/bash
+echo "tool executed" >> %s
+if [ -n "$MY_VAR" ]; then
+  echo "MY_VAR=$MY_VAR" >> %s
+fi
+`, outputFile, outputFile)
+	if err := os.WriteFile(toolExecutable, []byte(toolScriptContent), 0755); err != nil {
+		t.Fatalf("Failed to create test tool: %v", err)
+	}
+
+	// Create a setup script
+	setupScriptContent := `#!/bin/bash
+echo "this is not an env var"
+export MY_VAR="hello from script"
+`
+	if err := os.WriteFile(setupScript, []byte(setupScriptContent), 0755); err != nil {
+		t.Fatalf("Failed to create setup script: %v", err)
+	}
+
+	executor := &ToolExecutor{
+		ctx: &RunContext{
+			Root:              tempDir,
+			Verbose:           true,
+			GlobalCommandArgs: "-v --foo bar",
+			Config: &config.Config{
+				ToolPaths:      []string{tempDir},
+				EnvSetupScript: setupScript,
+			},
+		},
+	}
+
+	if err := executor.FindAndExecuteTool("test-tool", []string{}); err != nil {
+		t.Fatalf("Execution failed: %v", err)
+	}
+
+	output, err := os.ReadFile(outputFile)
+	if err != nil {
+		t.Fatalf("Failed to read output file: %v", err)
+	}
+
+	if !strings.Contains(string(output), "MY_VAR=hello from script") {
+		t.Errorf("Expected output to contain 'MY_VAR=hello from script', but it didn't. Got:\n%s", string(output))
+	}
+
+	if strings.Contains(string(output), "this is not an env var") {
+		t.Errorf("Expected output to not contain 'this is not an env var', but it did. Got:\n%s", string(output))
+	}
 }
 
 // Helper function to check if a string contains a substring

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // ToolExecutor handles finding and executing tools based on the configuration
@@ -75,6 +78,12 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 				ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
 			}
 
+			// Execute the env setup script if it's defined
+			env, err := te.executeEnvSetupScript()
+			if err != nil {
+				return fmt.Errorf("failed to execute env setup script: %w", err)
+			}
+
 			// Construct the full path to the executable
 			var fullPath string
 			if !filepath.IsAbs(tool.Path) {
@@ -84,15 +93,73 @@ func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error
 			}
 			executablePath := filepath.Join(fullPath, toolName)
 
-			return te.executeTool(executablePath, args)
+			return te.executeTool(executablePath, args, env)
 		}
 	}
 
 	return fmt.Errorf("tool '%s' not found in any configured tool path", toolName)
 }
 
+// executeEnvSetupScript executes the environment setup script if it is defined
+// in the .uber configuration file and returns the resulting environment.
+func (te *ToolExecutor) executeEnvSetupScript() ([]string, error) {
+	if te.ctx.Config.EnvSetupScript == "" {
+		return nil, nil // No script defined
+	}
+
+	// Resolve the script path
+	scriptPath := te.ctx.Config.EnvSetupScript
+	if !filepath.IsAbs(scriptPath) {
+		scriptPath = filepath.Join(te.ctx.Root, scriptPath)
+	}
+
+	// Check if the script exists and is executable
+	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
+		return nil, fmt.Errorf("script '%s' not found", scriptPath)
+	}
+	if !te.isExecutable(scriptPath) {
+		return nil, fmt.Errorf("script '%s' is not executable", scriptPath)
+	}
+
+	// Create the command to execute the script and capture its environment.
+	// We source the script and then run `env` to get all environment variables.
+	commandStr := fmt.Sprintf(". %s && env", scriptPath)
+	cmd := exec.Command("sh", "-c", commandStr)
+
+	cmd.Env = te.prepareEnvironment()
+
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if te.ctx.Verbose {
+		ColorPrint(ColorCyan, fmt.Sprintf("Executing env setup script: %s\n", scriptPath))
+	}
+
+	if err := cmd.Run(); err != nil {
+		return nil, fmt.Errorf("error executing env setup script '%s': %w", scriptPath, err)
+	}
+
+	// Parse the output of `env` into a slice of strings, filtering for valid env vars
+	var validEnvVars []string
+	scanner := bufio.NewScanner(&stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "=") {
+			validEnvVars = append(validEnvVars, line)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("error reading env setup script output: %w", err)
+	}
+
+	return validEnvVars, nil
+}
+
 // executeTool executes the tool with the given arguments
-func (te *ToolExecutor) executeTool(executablePath string, args []string) error {
+func (te *ToolExecutor) executeTool(executablePath string, args []string, env []string) error {
 	// Create the command
 	cmd := exec.Command(executablePath, args...)
 
@@ -102,6 +169,24 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string) error 
 	cmd.Stderr = os.Stderr
 
 	// Set environment variables for context
+	if env != nil {
+		cmd.Env = env
+	} else {
+		cmd.Env = te.prepareEnvironment()
+	}
+
+	// Execute the command
+	if te.ctx.Verbose {
+		ColorPrint(ColorGreen, fmt.Sprintf("Executing: %s %v\n", executablePath, args))
+		ColorPrint(ColorGreen, fmt.Sprintf("UBER_BIN_PATH=%s\n", te.ctx.UberBinPath))
+		ColorPrint(ColorGreen, fmt.Sprintf("UBER_PROJECT_ROOT=%s\n", te.ctx.Root))
+	}
+
+	return cmd.Run()
+}
+
+// prepareEnvironment creates the environment variables for tool execution
+func (te *ToolExecutor) prepareEnvironment() []string {
 	env := append(os.Environ(),
 		fmt.Sprintf("UBER_BIN_PATH=%s", te.ctx.UberBinPath),
 		fmt.Sprintf("UBER_PROJECT_ROOT=%s", te.ctx.Root),
@@ -112,16 +197,12 @@ func (te *ToolExecutor) executeTool(executablePath string, args []string) error 
 		env = append(env, "UBER_VERBOSE=1")
 	}
 
-	cmd.Env = env
-
-	// Execute the command
-	if te.ctx.Verbose {
-		ColorPrint(ColorGreen, fmt.Sprintf("Executing: %s %v\n", executablePath, args))
-		ColorPrint(ColorGreen, fmt.Sprintf("UBER_BIN_PATH=%s\n", te.ctx.UberBinPath))
-		ColorPrint(ColorGreen, fmt.Sprintf("UBER_PROJECT_ROOT=%s\n", te.ctx.Root))
+	// Add global command arguments if they exist
+	if te.ctx.GlobalCommandArgs != "" {
+		env = append(env, fmt.Sprintf("UBER_GLOBAL_COMMAND_ARGS=%s", te.ctx.GlobalCommandArgs))
 	}
 
-	return cmd.Run()
+	return env
 }
 
 // ListAvailableTools scans all configured tool paths and lists all executable tools
