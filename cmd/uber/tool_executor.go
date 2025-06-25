@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -49,7 +50,7 @@ func (te *ToolExecutor) GetAllAvailableTools() ([]AvailableTool, error) {
 			continue
 		}
 
-		// Add tools from this path to the list
+		// Add all tools from this path to the list
 		for _, toolName := range tools {
 			allTools = append(allTools, AvailableTool{
 				Name: toolName,
@@ -65,57 +66,86 @@ func (te *ToolExecutor) GetAllAvailableTools() ([]AvailableTool, error) {
 // and executes it with the given arguments
 func (te *ToolExecutor) FindAndExecuteTool(toolName string, args []string) error {
 	findToolStart := time.Now()
-	// Get all available tools
-	availableTools, err := te.GetAllAvailableTools()
-	if err != nil {
-		return err
-	}
-	te.ctx.TimeFindToolMs = time.Since(findToolStart).Milliseconds()
 
-	// Find the first occurrence of the tool (honoring tool_paths order)
-	for _, tool := range availableTools {
-		if tool.Name == toolName {
-			// Found the tool, execute it
-			if te.ctx.Verbose {
-				ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' in path '%s'\n", toolName, tool.Path))
-				ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
-			}
-			te.ctx.FoundToolPath = tool.Path
-
-			// Execute the env setup script if it's defined
-			envSetupStart := time.Now()
-			env, err := te.executeEnvSetup()
-			if err != nil {
-				return fmt.Errorf("failed to execute env setup script: %w", err)
-			}
-			te.ctx.TimeEnvSetupMs = time.Since(envSetupStart).Milliseconds()
-
-			// Construct the full path to the executable
-			var fullPath string
-			if !filepath.IsAbs(tool.Path) {
-				fullPath = filepath.Join(te.ctx.Root, tool.Path)
-			} else {
-				fullPath = tool.Path
-			}
-			executablePath := filepath.Join(fullPath, toolName)
-
-			execStart := time.Now()
-			err = te.executeTool(executablePath, args, env)
-			te.ctx.TimeExecToolMs = time.Since(execStart).Milliseconds()
-			if err != nil {
-				return err // Return original error
-			}
-
-			// After executing the tool, run the reporting command
-			if reportErr := te.executeReportingCmd(); reportErr != nil {
-				if te.ctx.Verbose {
-					ColorPrint(ColorYellow, fmt.Sprintf("Warning: reporting command failed: %v\n", reportErr))
-				}
-				// Do not return this error, as the main tool succeeded
-			}
-
-			return nil
+	// Search for the tool in each configured path in order
+	for _, toolPath := range te.ctx.Config.ToolPaths {
+		// Try to resolve the tool name (handles extensions)
+		resolvedName, err := te.resolveToolName(toolPath, toolName)
+		if err != nil {
+			// Continue to next path if tool not found in this one
+			continue
 		}
+
+		te.ctx.TimeFindToolMs = time.Since(findToolStart).Milliseconds()
+
+		// Found the tool, execute it
+		if te.ctx.Verbose {
+			ColorPrint(ColorGreen, fmt.Sprintf("Found tool '%s' (resolved to '%s') in path '%s'\n", toolName, resolvedName, toolPath))
+			ColorPrint(ColorGreen, fmt.Sprintf("Executing with args: %v\n", args))
+		}
+		te.ctx.FoundToolPath = toolPath
+
+		// Execute the env setup script if it's defined
+		envSetupStart := time.Now()
+		env, err := te.executeEnvSetup()
+		if err != nil {
+			return fmt.Errorf("failed to execute env setup script: %w", err)
+		}
+		te.ctx.TimeEnvSetupMs = time.Since(envSetupStart).Milliseconds()
+
+		// Construct the full path to the executable
+		var fullPath string
+		if !filepath.IsAbs(toolPath) {
+			fullPath = filepath.Join(te.ctx.Root, toolPath)
+		} else {
+			fullPath = toolPath
+		}
+		executablePath := filepath.Join(fullPath, resolvedName)
+
+		execStart := time.Now()
+		err = te.executeTool(executablePath, args, env)
+		te.ctx.TimeExecToolMs = time.Since(execStart).Milliseconds()
+		if err != nil {
+			return err // Return original error
+		}
+
+		// After executing the tool, run the reporting command
+		if reportErr := te.executeReportingCmd(); reportErr != nil {
+			if te.ctx.Verbose {
+				ColorPrint(ColorYellow, fmt.Sprintf("Warning: reporting command failed: %v\n", reportErr))
+			}
+			// Do not return this error, as the main tool succeeded
+		}
+
+		return nil
+	}
+
+	// If we get here, the tool wasn't found in any path
+	// Try to provide a helpful error message by checking if the tool exists with extensions
+	var suggestions []string
+	for _, toolPath := range te.ctx.Config.ToolPaths {
+		files, err := os.ReadDir(te.resolveToolFullPath(toolPath, ""))
+		if err != nil {
+			continue
+		}
+
+		for _, file := range files {
+			if file.IsDir() {
+				continue
+			}
+			fileName := file.Name()
+			if strings.HasPrefix(fileName, toolName+".") {
+				fullPath := filepath.Join(te.resolveToolFullPath(toolPath, ""), fileName)
+				if te.isExecutable(fullPath) {
+					suggestions = append(suggestions, fileName)
+				}
+			}
+		}
+	}
+
+	if len(suggestions) > 0 {
+		return fmt.Errorf("tool '%s' not found in any configured tool path. Did you mean: %s?",
+			toolName, strings.Join(suggestions, ", "))
 	}
 
 	return fmt.Errorf("tool '%s' not found in any configured tool path", toolName)
@@ -330,17 +360,38 @@ func (te *ToolExecutor) ListAvailableTools() error {
 	fmt.Println("Available tools:")
 	fmt.Println()
 
-	// Group tools by path for display
-	currentPath := ""
+	// Group tools by path and then by base name
+	toolsByPath := make(map[string][]AvailableTool)
 	for _, tool := range availableTools {
-		if tool.Path != currentPath {
-			if currentPath != "" {
-				fmt.Println()
-			}
-			ColorPrint(ColorCyan, fmt.Sprintf("From %s:\n", tool.Path))
-			currentPath = tool.Path
+		toolsByPath[tool.Path] = append(toolsByPath[tool.Path], tool)
+	}
+
+	for path, tools := range toolsByPath {
+		ColorPrint(ColorCyan, fmt.Sprintf("From %s:\n", path))
+
+		// Group by base name
+		baseNameMap := make(map[string][]string)
+		for _, tool := range tools {
+			base := strings.TrimSuffix(tool.Name, filepath.Ext(tool.Name))
+			baseNameMap[base] = append(baseNameMap[base], tool.Name)
 		}
-		fmt.Printf("  %s\n", tool.Name)
+
+		// Print tools, using base name if unambiguous
+		var printed []string
+		for base, names := range baseNameMap {
+			if len(names) == 1 {
+				printed = append(printed, base)
+			} else {
+				// Multiple tools with same base, print all full names
+				printed = append(printed, names...)
+			}
+		}
+		// Sort for consistent output
+		sort.Strings(printed)
+		for _, name := range printed {
+			fmt.Printf("  %s\n", name)
+		}
+		fmt.Println()
 	}
 
 	return nil
@@ -437,4 +488,86 @@ func (te *ToolExecutor) isExecutable(filePath string) bool {
 	}
 	mode := info.Mode()
 	return mode.IsRegular() && (mode&0111 != 0)
+}
+
+// ToolMatch represents a potential tool match with its full path and priority
+type ToolMatch struct {
+	Name     string
+	Path     string
+	FullPath string
+	Priority int // Lower number = higher priority
+}
+
+// resolveToolName handles the extension resolution logic
+// Returns the resolved tool name and any error
+func (te *ToolExecutor) resolveToolName(toolPath, requestedName string) (string, error) {
+	// If the requested name already has an extension, use it as-is
+	if filepath.Ext(requestedName) != "" {
+		fullPath := te.resolveToolFullPath(toolPath, requestedName)
+		if te.isExecutable(fullPath) {
+			return requestedName, nil
+		}
+		return "", fmt.Errorf("tool '%s' not found in '%s'", requestedName, toolPath)
+	}
+
+	// Find all executable files that could match this name
+	var matches []ToolMatch
+
+	files, err := os.ReadDir(te.resolveToolFullPath(toolPath, ""))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", fmt.Errorf("tool path '%s' does not exist", toolPath)
+		}
+		return "", fmt.Errorf("failed to read directory '%s': %w", toolPath, err)
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		fileName := file.Name()
+		// Check if this file matches our requested name (with or without extension)
+		if fileName == requestedName || strings.HasPrefix(fileName, requestedName+".") {
+			fullPath := filepath.Join(te.resolveToolFullPath(toolPath, ""), fileName)
+			if te.isExecutable(fullPath) {
+				priority := 1 // Default priority for files with extensions
+				if fileName == requestedName {
+					priority = 0 // Highest priority for files without extension
+				}
+				matches = append(matches, ToolMatch{
+					Name:     fileName,
+					Path:     toolPath,
+					FullPath: fullPath,
+					Priority: priority,
+				})
+			}
+		}
+	}
+
+	if len(matches) == 0 {
+		return "", fmt.Errorf("tool '%s' not found in '%s'", requestedName, toolPath)
+	}
+
+	// Sort by priority (lower number = higher priority)
+	sort.Slice(matches, func(i, j int) bool {
+		return matches[i].Priority < matches[j].Priority
+	})
+
+	// If we have exactly one match, or the first match has priority 0 (no extension), use it
+	if len(matches) == 1 || matches[0].Priority == 0 {
+		return matches[0].Name, nil
+	}
+
+	// Multiple matches with extensions - this is ambiguous
+	var extensions []string
+	for _, match := range matches {
+		ext := filepath.Ext(match.Name)
+		if ext != "" {
+			extensions = append(extensions, ext)
+		}
+	}
+
+	return "", fmt.Errorf("ambiguous tool name '%s' in '%s'. Found multiple files: %s. Please specify the extension (e.g., '%s%s')",
+		requestedName, toolPath, strings.Join(extensions, ", "), requestedName, extensions[0])
 }

@@ -394,3 +394,192 @@ echo "MY_VAR is: $MY_VAR" > %s
 		t.Errorf("Expected output '%s', got '%s'", expectedOutput, string(output))
 	}
 }
+
+func TestResolveToolNameWithExtension(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-extension-resolution")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create test files with different extensions
+	testFiles := []string{
+		"foo.sh",
+		"foo.py",
+		"bar.sh",
+		"baz", // No extension
+	}
+
+	for _, fileName := range testFiles {
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte("#!/bin/bash\necho 'test'"), 0755); err != nil {
+			t.Fatalf("Failed to create test file %s: %v", fileName, err)
+		}
+	}
+
+	executor := &ToolExecutor{
+		ctx: &RunContext{
+			Root:    "/test/project",
+			Verbose: false,
+			Config:  &config.Config{},
+		},
+	}
+
+	// Test cases
+	testCases := []struct {
+		name        string
+		requested   string
+		expected    string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name:        "exact match with extension",
+			requested:   "foo.sh",
+			expected:    "foo.sh",
+			expectError: false,
+		},
+		{
+			name:        "exact match without extension",
+			requested:   "baz",
+			expected:    "baz",
+			expectError: false,
+		},
+		{
+			name:        "ambiguous - multiple extensions",
+			requested:   "foo",
+			expectError: true,
+			errorMsg:    "ambiguous tool name",
+		},
+		{
+			name:        "not found",
+			requested:   "nonexistent",
+			expectError: true,
+			errorMsg:    "not found",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := executor.resolveToolName(tempDir, tc.requested)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error, got nil")
+					return
+				}
+				if tc.errorMsg != "" && !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Errorf("Expected error to contain '%s', got: %v", tc.errorMsg, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+					return
+				}
+				if result != tc.expected {
+					t.Errorf("Expected '%s', got '%s'", tc.expected, result)
+				}
+			}
+		})
+	}
+}
+
+func TestResolveToolNamePriority(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-extension-priority")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create test files: one without extension, one with extension
+	files := []string{"foo", "foo.sh"}
+
+	for _, fileName := range files {
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte("#!/bin/bash\necho 'test'"), 0755); err != nil {
+			t.Fatalf("Failed to create test file %s: %v", fileName, err)
+		}
+	}
+
+	executor := &ToolExecutor{
+		ctx: &RunContext{
+			Root:    "/test/project",
+			Verbose: false,
+			Config:  &config.Config{},
+		},
+	}
+
+	// When requesting "foo", it should prefer the file without extension
+	result, err := executor.resolveToolName(tempDir, "foo")
+	if err != nil {
+		t.Errorf("Expected no error, got: %v", err)
+	}
+	if result != "foo" {
+		t.Errorf("Expected 'foo' (no extension), got '%s'", result)
+	}
+}
+
+func TestGetAllAvailableToolsWithExtensions(t *testing.T) {
+	// Create a temporary directory for testing
+	tempDir, err := os.MkdirTemp("", "uber-test-available-tools")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Create test files with extensions
+	testFiles := []string{
+		"tool1.sh",
+		"tool1.py",
+		"tool2.sh",
+		"tool3", // No extension
+	}
+
+	for _, fileName := range testFiles {
+		filePath := filepath.Join(tempDir, fileName)
+		if err := os.WriteFile(filePath, []byte("#!/bin/bash\necho 'test'"), 0755); err != nil {
+			t.Fatalf("Failed to create test file %s: %v", fileName, err)
+		}
+	}
+
+	executor := &ToolExecutor{
+		ctx: &RunContext{
+			Root:    "/test/project",
+			Verbose: false,
+			Config: &config.Config{
+				ToolPaths: []string{tempDir},
+			},
+		},
+	}
+
+	tools, err := executor.GetAllAvailableTools()
+	if err != nil {
+		t.Fatalf("Expected no error, got: %v", err)
+	}
+
+	// Should return all 4 tools since users can run any of them directly
+	expectedCount := 4
+	if len(tools) != expectedCount {
+		t.Errorf("Expected %d tools, got %d", expectedCount, len(tools))
+	}
+
+	// Check that all tools are present
+	expectedTools := map[string]bool{
+		"tool1.sh": false,
+		"tool1.py": false,
+		"tool2.sh": false,
+		"tool3":    false,
+	}
+
+	for _, tool := range tools {
+		expectedTools[tool.Name] = true
+	}
+
+	for toolName, found := range expectedTools {
+		if !found {
+			t.Errorf("Expected tool '%s' to be in available tools list", toolName)
+		}
+	}
+}

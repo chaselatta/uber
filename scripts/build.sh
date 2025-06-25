@@ -3,13 +3,20 @@
 # Build script for uber
 set -e
 
+# Source shared utilities
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/utils.sh"
+
 echo "Building uber..."
 
+# Change to the project roo
+cd_project_root
+
 # Clean previous builds
-rm -rf dist/
+rm -rf out/
 
 # Build for current platform
-go build -o uber ./cmd/uber
+go build -o out/uber ./cmd/uber
 
 echo "Build complete! Binary created as 'uber'"
-echo "You can test it with: ./uber --version"
+echo "You can test it with: ./out/uber --version"
