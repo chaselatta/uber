@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# Release script for uber
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# Function to print colored output
+print_color() {
+  local color=$1
+  local message=$2
+  echo -e "${color}${message}${NC}"
+}
+
+# Function to validate version format
+validate_version() {
+  local version=$1
+  if [[ ! $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    print_color $RED "Error: Version must be in format vX.Y.Z (e.g., v1.0.0)"
+    return 1
+  fi
+  return 0
+}
+
+# Function to check if tag already exists
+check_tag_exists() {
+  local version=$1
+  if git tag -l | grep -q "^$version$"; then
+    print_color $RED "Error: Tag $version already exists"
+    return 1
+  fi
+  return 0
+}
+
+# Function to check git status
+check_git_status() {
+  if ! git diff-index --quiet HEAD --; then
+    print_color $YELLOW "Warning: You have uncommitted changes"
+    read -p "Do you want to continue anyway? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+      print_color $RED "Release cancelled"
+      exit 1
+    fi
+  fi
+}
+
+# Function to run tests
+run_tests() {
+  print_color $BLUE "Running tests..."
+
+  # Run go mod verify
+  print_color $BLUE "Verifying dependencies..."
+  if ! go mod verify; then
+    print_color $RED "Error: Dependency verification failed"
+    exit 1
+  fi
+
+  # Run tests
+  print_color $BLUE "Running test suite..."
+  if ! go test ./...; then
+    print_color $RED "Error: Tests failed"
+    exit 1
+  fi
+
+  # Build the binary to ensure it compiles
+  print_color $BLUE "Building binary..."
+  if ! go build -o out/uber ./cmd/uber; then
+    print_color $RED "Error: Build failed"
+    exit 1
+  fi
+
+  # Test the version flag
+  print_color $BLUE "Testing version flag..."
+  if ! ./out/uber --version; then
+    print_color $RED "Error: Version flag test failed"
+    exit 1
+  fi
+
+  print_color $GREEN "All tests passed!"
+  echo
+}
+
+# Main release process
+main() {
+  print_color $BLUE "=== Uber Release Script ==="
+  echo
+
+  # Check git status
+  check_git_status
+
+  # Get current branch
+  current_branch=$(git branch --show-current)
+  print_color $GREEN "Current branch: $current_branch"
+  echo
+
+  # Run tests before proceeding
+  run_tests
+
+  # Prompt for version
+  while true; do
+    read -p "Enter version (e.g., v1.0.0): " version
+    if validate_version "$version"; then
+      break
+    fi
+  done
+
+  # Check if tag already exists
+  if ! check_tag_exists "$version"; then
+    exit 1
+  fi
+
+  # Create release branch name
+  release_branch="release/$version"
+  print_color $BLUE "Release branch will be: $release_branch"
+  echo
+
+  # Confirm before proceeding
+  print_color $YELLOW "This will:"
+  echo "  1. Create branch: $release_branch"
+  echo "  2. Create tag: $version"
+  echo "  3. Push branch and tag to origin"
+  echo "  4. Trigger GitHub Actions release workflow"
+  echo
+
+  read -p "Proceed with release? (y/N): " -n 1 -r
+  echo
+  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    print_color $RED "Release cancelled"
+    exit 1
+  fi
+
+  # Create and switch to release branch
+  print_color $BLUE "Creating release branch..."
+  git checkout -b "$release_branch"
+
+  # Create tag
+  print_color $BLUE "Creating tag $version..."
+  git tag "$version"
+
+  # Push branch and tag
+  print_color $BLUE "Pushing to origin..."
+  git push origin "$release_branch"
+  git push origin "$version"
+
+  print_color $GREEN "=== Release Complete ==="
+  print_color $GREEN "Branch: $release_branch"
+  print_color $GREEN "Tag: $version"
+  print_color $GREEN "GitHub Actions will now build and release the binaries"
+  echo
+  print_color $BLUE "You can monitor the release at:"
+  print_color $BLUE "https://github.com/chaselatta/uber/actions"
+}
+
+# Run main function
+main "$@"

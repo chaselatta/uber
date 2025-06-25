@@ -19,8 +19,13 @@ jobs:
         with:
           go-version: '1.24'
 
-      - name: Build
-        run: go build ./...
+      - name: Build uber binary
+        run: |
+          mkdir -p out
+          go build -o out/uber ./cmd/uber
+
+      - name: Test version flag
+        run: ./out/uber --version
 
       - name: Run tests
         run: go test ./...

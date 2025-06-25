@@ -17,6 +17,7 @@ type RunContext struct {
 	UberBinPath       string
 	Verbose           bool
 	ListTools         bool
+	ShowVersion       bool
 	Command           string
 	RemainingArgs     []string
 	GlobalCommandArgs string
@@ -87,6 +88,7 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 	root := fs.String("root", "", "Specify the root directory (e.g., --root /path/to/dir)")
 	verbose := fs.BoolP("verbose", "v", false, "Enable verbose output (-v or --verbose)")
 	listTools := fs.Bool("list-tools", false, "List available tools")
+	showVersion := fs.Bool("version", false, "Show version information")
 
 	if output == nil {
 		output = os.Stderr
@@ -151,11 +153,14 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 	}
 
 	// Validate command presence
-	if !*listTools && command == "" {
+	if !(*listTools || *showVersion) && command == "" {
 		return nil, fmt.Errorf("missing required positional argument 'command'")
 	}
 	if *listTools && command != "" {
 		return nil, fmt.Errorf("--list-tools does not accept additional arguments: %s", command)
+	}
+	if *showVersion && command != "" {
+		return nil, fmt.Errorf("--version does not accept additional arguments: %s", command)
 	}
 
 	// Validate project root
@@ -189,6 +194,7 @@ func ParseArgs(binPath string, args []string, output io.Writer) (*RunContext, er
 		UberBinPath:       binPath,
 		Verbose:           *verbose,
 		ListTools:         *listTools,
+		ShowVersion:       *showVersion,
 		Command:           command,
 		RemainingArgs:     toolArgs,
 		GlobalCommandArgs: globalCommandArgs,

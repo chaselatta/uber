@@ -2,6 +2,34 @@
 
 Uber is a tool launcher that helps you organize and run scripts and executables from your project. It automatically finds tools based on a configuration file and executes them with the provided arguments.
 
+## Installation
+
+### Using Go Install (Recommended)
+
+```bash
+go install github.com/chaselatta/uber@latest
+```
+
+### Using Go Install with a specific version
+
+```bash
+go install github.com/chaselatta/uber@v1.0.0
+```
+
+### From Source
+
+```bash
+git clone https://github.com/chaselatta/uber.git
+cd uber
+go build -o uber ./cmd/uber
+```
+
+### Check Installation
+
+```bash
+uber --version
+```
+
 ## Features
 
 - **Automatic tool discovery**: Searches for executables in configured tool paths
@@ -11,14 +39,6 @@ Uber is a tool launcher that helps you organize and run scripts and executables 
 - **Verbose mode**: Get detailed information about tool discovery and execution with colored output
 - **Flexible configuration**: Simple TOML-based configuration
 - **Colored output**: When running in a terminal, verbose output uses colors for better readability
-
-## Installation
-
-Build the tool from source:
-
-```bash
-go build -o uber ./cmd/uber
-```
 
 ## Configuration
 
