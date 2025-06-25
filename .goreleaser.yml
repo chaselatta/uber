@@ -12,12 +12,12 @@ builds:
       - amd64
       - arm64
     binary: uber
-    main: ./cmd/uber
+    main: .
     ldflags:
       - -s -w
-      - -X main.version={{.Version}}
-      - -X main.commit={{.Commit}}
-      - -X main.date={{.Date}}
+      - -X github.com/chaselatta/uber/pkg/uber.Version={{.Version}}
+      - -X github.com/chaselatta/uber/pkg/uber.Commit={{.Commit}}
+      - -X github.com/chaselatta/uber/pkg/uber.Date={{.Date}}
 
 archives:
   - format: tar.gz

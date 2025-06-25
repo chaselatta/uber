@@ -22,7 +22,7 @@ jobs:
       - name: Build uber binary
         run: |
           mkdir -p out
-          go build -o out/uber ./cmd/uber
+          go build -o out/uber .
 
       - name: Test version flag
         run: ./out/uber --version

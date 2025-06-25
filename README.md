@@ -21,7 +21,7 @@ go install github.com/chaselatta/uber@v1.0.0
 ```bash
 git clone https://github.com/chaselatta/uber.git
 cd uber
-go build -o uber ./cmd/uber
+go build -o uber .
 ```
 
 ### Check Installation

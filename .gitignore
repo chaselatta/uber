@@ -20,6 +20,7 @@ go.work
 # Build output directory
 out/
 bin/
+dist/
 
 # IDE and editor files
 .vscode/
