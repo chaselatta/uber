@@ -355,10 +355,18 @@ func (te *ToolExecutor) resolveToolFullPath(toolPath, toolName string) string {
 
 func (te *ToolExecutor) findExecutableInPath(toolPath, toolName string) (string, error) {
 	fullPath := te.resolveToolFullPath(toolPath, toolName)
+
+	// Check if the file exists
+	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("tool '%s' not found in '%s'", toolName, toolPath)
+	}
+
+	// Check if the file is executable
 	if te.isExecutable(fullPath) {
 		return fullPath, nil
 	}
-	return "", fmt.Errorf("tool '%s' not found or not executable in '%s'", toolName, toolPath)
+
+	return "", fmt.Errorf("file exists but is not executable")
 }
 
 // findExecutable finds the executable for a given tool name in the configured tool paths
