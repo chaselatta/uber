@@ -138,42 +138,6 @@ check_git_status() {
   fi
 }
 
-# Function to run tests
-run_tests() {
-  print_color $BLUE "Running tests..."
-
-  # Run go mod verify
-  print_color $BLUE "Verifying dependencies..."
-  if ! go mod verify; then
-    print_color $RED "Error: Dependency verification failed"
-    exit 1
-  fi
-
-  # Run tests
-  print_color $BLUE "Running test suite..."
-  if ! go test ./...; then
-    print_color $RED "Error: Tests failed"
-    exit 1
-  fi
-
-  # Build the binary to ensure it compiles
-  print_color $BLUE "Building binary..."
-  if ! go build -o out/uber .; then
-    print_color $RED "Error: Build failed"
-    exit 1
-  fi
-
-  # Test the version flag
-  print_color $BLUE "Testing version flag..."
-  if ! ./out/uber --version; then
-    print_color $RED "Error: Version flag test failed"
-    exit 1
-  fi
-
-  print_color $GREEN "All tests passed!"
-  echo
-}
-
 # Main release process
 main() {
   # Parse command line arguments
@@ -189,9 +153,6 @@ main() {
   current_branch=$(git branch --show-current)
   print_color $GREEN "Current branch: $current_branch"
   echo
-
-  # Run tests before proceeding
-  run_tests
 
   # Get current and suggested versions
   local current_version=$(get_latest_version)
