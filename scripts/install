@@ -13,20 +13,26 @@ source "$SCRIPT_DIR/lib/utils.sh"
 OUTPUT_PATH=""
 VERBOSE=false
 DRY_RUN=false
+REMOTE_INSTALL=false
 
 # Function to show help
 show_install_help() {
   show_help "$0" "[OPTIONS]" \
-    "This script installs the uber binary to an appropriate location using GoReleaser." \
+    "This script installs the uber binary to an appropriate location." \
     "  -o, --output PATH    Specify custom installation path
   -v, --verbose        Enable verbose output
   --dry-run            Show where uber would be installed without building
+  --remote             Download and install the latest release from GitHub
   -h, --help           Show this help message" \
     "The script will automatically choose an installation location:
   1. ~/.local/bin (if in PATH)
   2. ~/bin (if in PATH)
   3. Custom path (if specified with --output)
-  4. Current directory (if no suitable existing location found)"
+  4. Current directory (if no suitable existing location found)
+
+Installation methods:
+  --remote: Downloads the latest release from GitHub (recommended)
+  Default: Builds locally using GoReleaser"
 }
 
 # Function to parse command line arguments
@@ -43,6 +49,10 @@ parse_arguments() {
       ;;
     --dry-run)
       DRY_RUN=true
+      shift
+      ;;
+    --remote)
+      REMOTE_INSTALL=true
       shift
       ;;
     -h | --help)
@@ -129,7 +139,11 @@ handle_dry_run() {
   print_info "Uber would be installed to: $INSTALL_PATH"
   echo ""
   print_info "Installation details:"
-  echo "  Source: $PROJECT_ROOT (using GoReleaser)"
+  if [ "$REMOTE_INSTALL" = true ]; then
+    echo "  Source: GitHub releases (latest version)"
+  else
+    echo "  Source: $PROJECT_ROOT (using GoReleaser)"
+  fi
   echo "  Target: $INSTALL_PATH"
   echo "  Directory: $INSTALL_DIR"
   echo ""
@@ -152,6 +166,7 @@ check_goreleaser() {
     print_error "GoReleaser is not installed or not in PATH"
     print_info "Please install GoReleaser first:"
     echo "  go install github.com/goreleaser/goreleaser@latest"
+    print_info "Or use --remote to download from GitHub releases instead"
     exit 1
   fi
 }
@@ -206,6 +221,113 @@ install_binary() {
   fi
 }
 
+# Function to download and install from GitHub releases
+install_from_github() {
+  print_info "Downloading latest uber release from GitHub..."
+
+  # Determine platform and architecture
+  local os_name
+  local arch_name
+
+  case "$(uname -s)" in
+  Darwin*) os_name="Darwin" ;;
+  Linux*) os_name="Linux" ;;
+  CYGWIN* | MINGW32* | MSYS* | MINGW*) os_name="Windows" ;;
+  *) print_error "Unsupported operating system: $(uname -s)" && exit 1 ;;
+  esac
+
+  case "$(uname -m)" in
+  x86_64) arch_name="x86_64" ;;
+  arm64 | aarch64) arch_name="arm64" ;;
+  *) print_error "Unsupported architecture: $(uname -m)" && exit 1 ;;
+  esac
+
+  # Get the latest release info
+  local release_info
+  if [ "$VERBOSE" = true ]; then
+    print_info "Fetching latest release information..."
+  fi
+
+  release_info=$(curl -s https://api.github.com/repos/chaselatta/uber/releases/latest)
+  if [ $? -ne 0 ]; then
+    print_error "Failed to fetch release information from GitHub"
+    exit 1
+  fi
+
+  # Extract version and download URL
+  local version=$(echo "$release_info" | grep '"tag_name"' | cut -d'"' -f4)
+  local download_url=$(echo "$release_info" | grep "browser_download_url.*${os_name}_${arch_name}" | cut -d'"' -f4)
+
+  if [ -z "$version" ] || [ -z "$download_url" ]; then
+    print_error "Failed to extract version or download URL from release information"
+    exit 1
+  fi
+
+  print_info "Latest version: $version"
+  print_info "Download URL: $download_url"
+
+  # Create temporary directory
+  local temp_dir=$(mktemp -d)
+  local archive_path="$temp_dir/uber_${version}.tar.gz"
+
+  # Download the release
+  if [ "$VERBOSE" = true ]; then
+    print_info "Downloading release archive..."
+  fi
+
+  if ! curl -L -o "$archive_path" "$download_url"; then
+    print_error "Failed to download release from GitHub"
+    rm -rf "$temp_dir"
+    exit 1
+  fi
+
+  # Extract the archive
+  if [ "$VERBOSE" = true ]; then
+    print_info "Extracting archive..."
+  fi
+
+  if ! tar -xzf "$archive_path" -C "$temp_dir"; then
+    print_error "Failed to extract release archive"
+    rm -rf "$temp_dir"
+    exit 1
+  fi
+
+  # Find the binary in the extracted directory
+  local binary_path="$temp_dir/uber"
+  if [ ! -f "$binary_path" ]; then
+    print_error "Binary not found in extracted archive"
+    rm -rf "$temp_dir"
+    exit 1
+  fi
+
+  # Make it executable
+  chmod +x "$binary_path"
+
+  # Copy to installation location
+  print_info "Installing to: $INSTALL_PATH"
+  cp "$binary_path" "$INSTALL_PATH"
+
+  # Clean up
+  rm -rf "$temp_dir"
+
+  print_success "Uber $version installed successfully!"
+  echo ""
+
+  # Verify installation
+  if [ -f "$INSTALL_PATH" ] && [ -x "$INSTALL_PATH" ]; then
+    print_success "Installation verified: $INSTALL_PATH is executable"
+
+    # Test version flag
+    if [ "$VERBOSE" = true ]; then
+      print_info "Testing version flag..."
+      "$INSTALL_PATH" --version
+    fi
+  else
+    print_error "Installation verification failed"
+    exit 1
+  fi
+}
+
 # Function to show installation summary
 show_installation_summary() {
   echo ""
@@ -237,11 +359,17 @@ main() {
   # Change to project root
   cd_project_root
 
-  print_header "=== Uber Installation (GoReleaser) ==="
+  if [ "$REMOTE_INSTALL" = true ]; then
+    print_header "=== Uber Installation (GitHub Releases) ==="
+  else
+    print_header "=== Uber Installation (GoReleaser) ==="
+  fi
   echo ""
 
-  # Check if GoReleaser is available
-  check_goreleaser
+  # Check if GoReleaser is available (only for local builds)
+  if [ "$REMOTE_INSTALL" = false ]; then
+    check_goreleaser
+  fi
 
   # Determine installation location
   determine_install_location
@@ -252,7 +380,11 @@ main() {
   fi
 
   # Install the binary
-  install_binary
+  if [ "$REMOTE_INSTALL" = true ]; then
+    install_from_github
+  else
+    install_binary
+  fi
 
   # Show installation summary
   show_installation_summary
